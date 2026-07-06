@@ -1,0 +1,22 @@
+# Copy this file to docker-compose.override.yml for local dev.
+# docker-compose.override.yml is gitignored and must NEVER be committed:
+# it exists only to override docker-compose.yml (the prod source of truth)
+# on your own machine.
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# Local dev has no nginx reverse proxy: the frontend is built to call the
+# backend directly on localhost, and only db/backend/frontend are started
+# (see GUIDE_DEMARRAGE.md / README_DOCKER.md for the launch command).
+
+services:
+  frontend:
+    build:
+      args:
+        - VITE_API_URL=http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+
+  backend:
+    ports:
+      - "127.0.0.1:8000:8000"

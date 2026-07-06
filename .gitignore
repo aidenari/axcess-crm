@@ -24,3 +24,6 @@ frontend/dist/
 *.sql
 debug_log.txt
 frontend/vite.config.js.timestamp-*
+
+# Local dev override (prod uses docker-compose.yml only, never commit this)
+docker-compose.override.yml

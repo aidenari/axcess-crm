@@ -15,8 +15,34 @@ Ce guide explique comment installer et lancer le projet **axcess-crm** sur un en
     cd C:\axcess-crm
     ```
 
+## Config prod vs config locale
+`docker-compose.yml` (versionné dans Git) est la **config de PROD** (sert sur le VPS, avec
+le service `nginx` en `network_mode: host` et `VITE_API_URL=http://10.0.0.1/api`). Ne la
+modifiez jamais pour du dev local — un `git pull` sur le VPS écraserait sinon la config
+de prod, comme c'est déjà arrivé.
+
+Pour le dev local, copiez le fichier d'exemple une seule fois :
+```powershell
+copy docker-compose.override.yml.example docker-compose.override.yml
+```
+`docker-compose.override.yml` est ignoré par Git (`.gitignore`) : il ne doit **jamais**
+être commité. Docker Compose le charge automatiquement en plus de `docker-compose.yml`
+dès qu'il existe (pas besoin de `-f` explicite) et surcharge `VITE_API_URL` vers
+`http://localhost:8000`.
+
+Sur le VPS (prod), ce fichier ne doit **pas exister** sur le disque — sinon le service
+`nginx` n'est pas concerné par l'override mais la config frontend serait quand même
+écrasée. C'est pourquoi le lancement en local se fait explicitement sans le service
+`nginx` (voir commande ci-dessous).
+
 ## Lancement (Build & Run)
-Pour construire les images et lancer l'application en arrière-plan :
+
+**En local (dev)** — ne lance pas `nginx` (réservé à la prod) :
+```powershell
+docker compose up --build -d db backend frontend
+```
+
+**En prod (VPS)** — lance les 4 services, y compris `nginx` :
 ```powershell
 docker compose up --build -d
 ```
