@@ -1,0 +1,13 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+pydantic==2.5.0
+python-dotenv==1.0.0
+alembic==1.13.1         # migrations de base de données (versionnage des tables)
+email-validator==2.1.0  # validation des emails via Pydantic
+pytest==7.4.3           # pour tester ton API plus tard
+httpx==0.24.1           # client HTTP pour les tests

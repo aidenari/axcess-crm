@@ -1,0 +1,8 @@
+<div className="flex items-center justify-between mb-4">
+        <button className="text-blue-700 hover:underline" onClick={() => navigate('/programmes')}>← Tous les projets</button>
+        <div className="flex items-center gap-2">
+          <button className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" onClick={exportCSV}>Exporter CSV</button>
+          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={(e)=>onImport(e.target.files?.[0])} />
+          <button className="px-4 py-2 rounded border" onClick={() => fileRef.current?.click()}>Importer CSV</button>
+        </div>
+      
