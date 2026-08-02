@@ -105,6 +105,10 @@ class Lot(Base):
 
     acquereur: Mapped[str | None] = mapped_column(String(255), nullable=True)
     statut: Mapped[str] = mapped_column(String(20), default="Libre")
+    date_reservation: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    date_acte: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    batiment: Mapped[Batiment] = relationship("Batiment", back_populates="lots")
 
     batiment: Mapped[Batiment] = relationship("Batiment", back_populates="lots")
     client: Mapped[Client | None] = relationship("Client", back_populates="lots")

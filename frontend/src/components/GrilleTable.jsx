@@ -34,7 +34,11 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
 
   const onUpdate = async (id, patch) => {
     setLots(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l))
-    try { await api.put(`/lots/${id}`, patch); onChanged?.() } catch (e) { console.error(e) }
+    try {
+      const { data } = await api.put(`/lots/${id}`, patch)
+      setLots(prev => prev.map(l => l.id === id ? data : l))
+      onChanged?.()
+    } catch (e) { console.error(e) }
   }
 
   const addLotLocal = (l) => { setLots(prev => [l, ...prev]); onChanged?.() }
@@ -144,6 +148,7 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
         onSaved={(updated) => {
           if (!updated?.id) return
           setLots(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x))
+          load()
           onChanged?.()
         }}
         onDeleted={(deletedId) => {

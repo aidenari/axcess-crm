@@ -156,6 +156,8 @@ class LotCreate(BaseModel):
     prix_m2_appart_parking: float | None = None
     acquereur: str | None = None
     statut: str | None = None
+    date_reservation: str | None = None
+    date_acte: str | None = None
 
 
 class LotUpdate(BaseModel):
@@ -179,6 +181,23 @@ class LotUpdate(BaseModel):
     prix_m2_appart_parking: float | None = None
     acquereur: str | None = None
     statut: str | None = None
+    date_reservation: str | None = None
+    date_acte: str | None = None
+
+
+# --- Annexes ---
+
+class AnnexeCreate(BaseModel):
+    type: str   # "Garage" | "Carport" | "Parking" | "Cave"
+    numero: str | None = None
+
+
+class AnnexeRead(BaseModel):
+    id: int
+    lot_id: int
+    type: str
+    numero: str | None = None
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LotRead(BaseModel):
@@ -204,8 +223,11 @@ class LotRead(BaseModel):
     prix_m2_appart_parking: float | None = None
     acquereur: str | None = None
     statut: str
+    date_reservation: str | None = None
+    date_acte: str | None = None
     programme_name: str | None = None
     client_name: str | None = None
+    annexes: list[AnnexeRead] = []
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -294,21 +316,6 @@ class ClientBasic(BaseModel):
     email: EmailStr | None = None
 
 
-
-
-# --- Annexes ---
-
-class AnnexeCreate(BaseModel):
-    type: str   # "Garage" | "Carport" | "Parking" | "Cave"
-    numero: str | None = None
-
-
-class AnnexeRead(BaseModel):
-    id: int
-    lot_id: int
-    type: str
-    numero: str | None = None
-    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Dossiers acquéreurs ---

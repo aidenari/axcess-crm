@@ -61,7 +61,7 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
     if (!open) return
     const loadClients = async () => {
       try {
-        const { data } = await api.get('/clients')
+        const { data } = await api.get('/clients/all')
         setClients(data || [])
       } catch (e) {
         console.error("Failed to load clients", e)

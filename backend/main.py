@@ -463,7 +463,23 @@ def delete_batiment(batiment_id: int, db: Session = Depends(get_db)):
 
 
 # ----------------- Lots -----------------
+def _enrich_lot(lot: Lot, db: Session) -> dict:
+    item = {k: v for k, v in lot.__dict__.items() if not k.startswith("_")}
 
+    bat = db.get(Batiment, lot.batiment_id)
+    prog = db.get(Programme, bat.programme_id) if bat else None
+    item["programme_name"] = prog.nom if prog else None
+
+    client = db.get(Client, lot.client_id) if lot.client_id else None
+    if client:
+        item["client_name"] = f"{client.last_name} {client.first_name}".strip()
+    else:
+        item["client_name"] = lot.acquereur
+
+    item["annexes"] = lot.annexes
+
+    return item
+    
 @app.get("/lots", response_model=list[LotRead])
 def list_lots(
     programme_id: int | None = None,
@@ -509,7 +525,7 @@ def create_lot(payload: LotCreate, db: Session = Depends(get_db)):
     db.add(l)
     db.commit()
     db.refresh(l)
-    return l
+    return _enrich_lot(l, db)
 @app.put("/lots/{lot_id}", response_model=LotRead)
 def update_lot(lot_id: int, patch: LotUpdate, db: Session = Depends(get_db)):
     l = db.get(Lot, lot_id)
@@ -551,7 +567,7 @@ def update_lot(lot_id: int, patch: LotUpdate, db: Session = Depends(get_db)):
     db.add(l)
     db.commit()
     db.refresh(l)
-    return l
+    return _enrich_lot(l, db)
 
 
 @app.delete("/lots/{lot_id}", status_code=204)

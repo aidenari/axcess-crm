@@ -89,6 +89,7 @@ export default function LotRow({ lot, onUpdate, statusDisplayMap, statusSendMap,
           {(() => {
             const name = lot.dossier_noms
               || (lot.acquereurs?.length ? lot.acquereurs.join(' + ') : null)
+              || lot.client_name
               || lot.acquereur
             return name
               ? <span className="font-semibold text-blue-800">{name}</span>
