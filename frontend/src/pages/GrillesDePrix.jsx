@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { Download } from 'lucide-react'
 import api from '../api/axios'
 import ProgrammeHeader from '../components/ProgrammeHeader.jsx'
 import StatsBar from '../components/StatsBar.jsx'
@@ -113,17 +114,21 @@ export default function GrillesDePrix() {
     setBatiments(prev => [bat, ...prev])
   }
 
-  const exportCSV = async () => {
+  const exportExcel = async () => {
     if (!selectedProgramme) return
     try {
-      const res = await api.get('/lots/export', { params: { programme_id: selectedProgramme }, responseType: 'blob' })
-      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
+      const res = await api.get(`/programmes/${selectedProgramme}/export`, { responseType: 'blob' })
+      const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const match = res.headers['content-disposition']?.match(/filename="?([^"]+)"?/)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `lots_programme_${selectedProgramme}.csv`
+      a.download = match ? match[1] : `export_programme_${selectedProgramme}.xlsx`
       a.click(); URL.revokeObjectURL(url)
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      alert("Erreur lors de l'export Excel.")
+    }
   }
 
   const downloadTemplate = async () => {
@@ -181,7 +186,14 @@ export default function GrillesDePrix() {
       </div>
       <div className="flex items-center justify-end mb-4">
         <div className="flex items-center gap-2">
-          <button className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" onClick={exportCSV}>Exporter CSV</button>
+          <button
+            className="flex items-center gap-1.5 bg-green-700 text-white px-4 py-2 rounded hover:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={exportExcel}
+            disabled={!selectedProgramme}
+          >
+            <Download size={16} />
+            Exporter Excel
+          </button>
           {!isReadOnly() && (
             <>
               <button className="px-4 py-2 rounded border text-sm text-gray-600 hover:bg-gray-50" onClick={downloadTemplate}>⬇ Modèle CSV</button>
@@ -212,7 +224,7 @@ export default function GrillesDePrix() {
               <li><strong>Prix</strong> : nombre entier ou décimal (ex: 250000 ou 250000.00)</li>
               <li><strong>acquereur</strong> : laisser vide si aucun</li>
             </ul>
-            <p className="text-xs text-blue-700 mb-4">💡 Conseil : exportez d'abord une grille existante pour obtenir un fichier au bon format.</p>
+            <p className="text-xs text-blue-700 mb-4">💡 Conseil : téléchargez d'abord le « Modèle CSV » pour obtenir un fichier au bon format.</p>
             <div className="flex justify-end gap-2">
               <button className="px-4 py-2 rounded border text-gray-600 hover:bg-gray-50" onClick={() => setShowImportWarning(false)}>Annuler</button>
               <button className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700" onClick={() => { setShowImportWarning(false); fileRef.current?.click() }}>J'ai compris, choisir un fichier</button>

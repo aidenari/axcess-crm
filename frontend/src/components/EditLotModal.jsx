@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import Modal from './Modal.jsx'
 import ClientDrawer from './ClientDrawer.jsx'
 import api from '../api/axios'
-import { Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 
 const ANNEXE_TYPES = ['Garage', 'Carport', 'Parking', 'Cave']
 
@@ -215,50 +215,65 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
             <input className="input" name="orientation" value={form.orientation} onChange={onChange} />
           </div>
           {/* Annexes manager */}
-          <div className="col-span-2 border rounded-lg p-3 bg-gray-50">
-            <div className="text-sm font-medium mb-2">Annexes</div>
+          <div className="col-span-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+            <div className="text-sm font-semibold text-gray-700 mb-2">Annexes</div>
+
             {annexes.length > 0 && (
-              <div className="space-y-1 mb-3">
+              <div className="space-y-2 mb-3">
                 {annexes.map(a => (
-                  <div key={a.id} className="flex items-center gap-2 text-sm bg-white border rounded px-2 py-1">
-                    <span className="font-medium w-20">{a.type}</span>
-                    <span className="text-gray-500 flex-1">{a.numero || <span className="italic text-gray-300">Sans numéro</span>}</span>
+                  <div key={a.id} className="flex items-center justify-between gap-2 bg-white border border-gray-300 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-sm font-medium">
+                        {a.type}
+                      </span>
+                      <span className="text-gray-700">
+                        {a.numero || <span className="italic text-gray-400">Sans numéro</span>}
+                      </span>
+                    </div>
                     <button
                       type="button"
-                      className="text-red-400 hover:text-red-600 p-0.5 rounded"
+                      className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
                       onClick={() => removeAnnexe(a.id)}
-                      title="Supprimer"
+                      title="Supprimer cette annexe"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 ))}
               </div>
             )}
-            <div className="flex items-center gap-2">
-              <select
-                className="input text-sm flex-shrink-0 w-32"
-                value={newAnnexeType}
-                onChange={e => setNewAnnexeType(e.target.value)}
-              >
-                {ANNEXE_TYPES.map(t => <option key={t}>{t}</option>)}
-              </select>
-              <input
-                className="input text-sm flex-1"
-                placeholder="Numéro (ex: 12, B3)"
-                value={newAnnexeNumero}
-                onChange={e => setNewAnnexeNumero(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addAnnexe() } }}
-              />
-              <button
-                type="button"
-                className="btn text-sm px-3 py-1.5 whitespace-nowrap"
-                onClick={addAnnexe}
-                disabled={annexeAdding || !lot?.id}
-              >
-                + Ajouter
-              </button>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm mb-1">Type d'annexe</label>
+                <select
+                  className="input"
+                  value={newAnnexeType}
+                  onChange={e => setNewAnnexeType(e.target.value)}
+                >
+                  {ANNEXE_TYPES.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Numéro</label>
+                <input
+                  className="input"
+                  placeholder="ex : 12, B3"
+                  value={newAnnexeNumero}
+                  onChange={e => setNewAnnexeNumero(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addAnnexe() } }}
+                />
+              </div>
             </div>
+            <button
+              type="button"
+              className="btn w-full mt-3 flex items-center justify-center gap-1.5"
+              onClick={addAnnexe}
+              disabled={annexeAdding || !lot?.id}
+            >
+              <Plus size={16} />
+              {annexeAdding ? 'Ajout en cours...' : "Ajouter l'annexe"}
+            </button>
           </div>
           <div className="flex items-center gap-4 col-span-2 flex-wrap">
             <label className="flex items-center gap-2"><input type="checkbox" name="hasJardin" checked={form.hasJardin} onChange={onChange} /> Jardin</label>

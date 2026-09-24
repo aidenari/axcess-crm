@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Download } from 'lucide-react'
 import api from '../api/axios'
 import { isReadOnly } from '../utils/auth'
 import { formatPhone } from '../utils/formatPhone'
@@ -65,6 +66,22 @@ export default function Clients() {
     return matchType && matchNom
   })
 
+  const exportExcel = async () => {
+    try {
+      const res = await api.get('/clients/export', { responseType: 'blob' })
+      const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const match = res.headers['content-disposition']?.match(/filename="?([^"]+)"?/)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = match ? match[1] : 'export_clients.xlsx'
+      a.click(); URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error(e)
+      alert("Erreur lors de l'export Excel.")
+    }
+  }
+
   const handleDelete = async () => {
     if (!deleteTarget) return
     try {
@@ -81,15 +98,25 @@ export default function Clients() {
       {/* En-tête */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-semibold">Clients</h1>
-        {!isReadOnly() && (
+        <div className="flex items-center gap-2">
           <button
-            className="btn bg-blue-600 hover:bg-blue-700 text-white"
+            className="flex items-center gap-1.5 bg-green-700 text-white px-4 py-2 rounded hover:bg-green-800"
             type="button"
-            onClick={() => { setEditingClient(null); setShowDrawer(true) }}
+            onClick={exportExcel}
           >
-            + Nouveau client
+            <Download size={16} />
+            Exporter Excel
           </button>
-        )}
+          {!isReadOnly() && (
+            <button
+              className="btn bg-blue-600 hover:bg-blue-700 text-white"
+              type="button"
+              onClick={() => { setEditingClient(null); setShowDrawer(true) }}
+            >
+              + Nouveau client
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filtres */}

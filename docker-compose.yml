@@ -28,7 +28,7 @@ services:
       - ALLOW_ORIGINS=${ALLOW_ORIGINS}
       - PYTHONPATH=/app
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -40,24 +40,27 @@ services:
     build:
       context: ./frontend
       args:
-        - VITE_API_URL=http://10.0.0.1/api
+        - VITE_API_URL=/api
     container_name: axcess-frontend
     restart: always
     ports:
-      - "127.0.0.1:3000:3000"
+      - "0.0.0.0:3000:3000"
     networks:
       - internal
 
   nginx:
     image: nginx:alpine
     container_name: axcess-nginx
-    network_mode: host
+    ports:
+      - "0.0.0.0:80:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
       - frontend
     restart: always
+    networks:
+      - internal
 
 volumes:
   db_data:

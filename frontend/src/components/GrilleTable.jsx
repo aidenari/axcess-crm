@@ -58,10 +58,19 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
         const okT = filters?.type === 'Tous' || l.type === filters.type
         return okS && okT
       })
-      .sort((a, b) => niveauOrder(a.niveau) - niveauOrder(b.niveau))
+      .sort((a, b) => {
+        const dn = niveauOrder(a.niveau) - niveauOrder(b.niveau)
+        if (dn !== 0) return dn
+        return (a.lot || '').localeCompare(b.lot || '', undefined, { numeric: true, sensitivity: 'base' })
+      })
   }, [lots, filters])
 
   const caTotal = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.prix_total) || 0), 0), [filtered])
+  const totalSha = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.sha_m2) || 0), 0), [filtered])
+  const totalPrixLogement = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.prix_logement) || 0), 0), [filtered])
+  const totalPrixStationnement = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.prix_stationnement) || 0), 0), [filtered])
+  const avgPrixM2Appart = totalSha > 0 ? totalPrixLogement / totalSha : null
+  const avgPrixM2Parking = totalSha > 0 ? caTotal / totalSha : null
 
   const handleDeleteBatiment = async () => {
     if (!window.confirm("Êtes-vous sûr de vouloir supprimer ce bâtiment et tous ses lots ?")) return
@@ -133,10 +142,16 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
           </tbody>
           {filtered.length > 0 && (
             <tfoot>
-              <tr className="bg-gray-50">
-                <td className="p-2 border" colSpan={11}>Total bâtiment</td>
-                <td className="p-2 border font-semibold">{caTotal.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</td>
-                <td className="p-2 border" colSpan={7}></td>
+              <tr className="bg-gray-50 font-semibold">
+                <td className="p-2 border" colSpan={4}>Total bâtiment ({filtered.length} lot{filtered.length > 1 ? 's' : ''})</td>
+                <td className="p-2 border">{totalSha.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m²</td>
+                <td className="p-2 border" colSpan={4}></td>
+                <td className="p-2 border">{totalPrixLogement.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</td>
+                <td className="p-2 border">{totalPrixStationnement.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</td>
+                <td className="p-2 border">{caTotal.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</td>
+                <td className="p-2 border">{avgPrixM2Appart != null ? avgPrixM2Appart.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }) : '-'}</td>
+                <td className="p-2 border">{avgPrixM2Parking != null ? avgPrixM2Parking.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }) : '-'}</td>
+                <td className="p-2 border" colSpan={5}></td>
               </tr>
             </tfoot>
           )}

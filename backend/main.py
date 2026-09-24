@@ -7,6 +7,9 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+import re
+import unicodedata
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -59,6 +62,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -411,6 +415,118 @@ def programme_statistics(programme_id: int, db: Session = Depends(get_db)):
     return _compute_stats(lots)
 
 
+def _natural_sort_key(value: str | None) -> list:
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", value or "")]
+
+
+def _slugify(value: str | None) -> str:
+    ascii_value = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", ascii_value).strip("_").lower()
+    return slug or "export"
+
+
+def _build_xlsx_response(
+    headers: list[str],
+    rows: list[list],
+    sheet_title: str,
+    filename: str,
+    money_columns: set[int] = frozenset(),
+) -> StreamingResponse:
+    """Genere un .xlsx en memoire (lecture seule, aucune ecriture en base) et
+    le renvoie en telechargement. Partage par tous les exports xlsx :
+    en-tete gras, largeurs de colonnes ajustees, meme media type."""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = re.sub(r"[\[\]:*?/\\]", "", sheet_title or "Export")[:31] or "Export"
+
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for row in rows:
+        ws.append(row)
+
+    for col_idx in money_columns:
+        for row_idx in range(2, ws.max_row + 1):
+            ws.cell(row=row_idx, column=col_idx).number_format = "#,##0 €"
+
+    for col_idx, header in enumerate(headers, start=1):
+        width = len(header)
+        for row_idx in range(2, ws.max_row + 1):
+            v = ws.cell(row=row_idx, column=col_idx).value
+            if v is not None:
+                width = max(width, len(str(v)))
+        ws.column_dimensions[get_column_letter(col_idx)].width = width + 2
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/programmes/{programme_id}/export")
+def export_programme_xlsx(programme_id: int, db: Session = Depends(get_db)):
+    """Export lecture seule d'un programme au format xlsx (aucune ecriture en base)."""
+    from datetime import date
+
+    prog = db.get(Programme, programme_id)
+    if not prog:
+        raise HTTPException(status_code=404, detail="Programme not found")
+
+    rows = (
+        db.query(Lot, Batiment.nom, Client)
+        .join(Batiment, Batiment.id == Lot.batiment_id)
+        .outerjoin(Client, Client.id == Lot.client_id)
+        .filter(Batiment.programme_id == programme_id)
+        .all()
+    )
+    rows.sort(key=lambda r: (r[1] or "", _natural_sort_key(r[0].lot)))
+
+    headers = [
+        "Bâtiment", "N° lot", "Niveau", "Type", "Surface sol", "SHA m²",
+        "Prix logement", "Prix stationnement", "Prix total",
+        "Prix/m² appart", "Prix/m² + parking", "Statut",
+        "Date réservation", "Date acte", "Acquéreur",
+    ]
+    price_columns = {7, 8, 9, 10, 11}  # colonnes Prix logement .. Prix/m² + parking (1-indexees)
+
+    data_rows = []
+    for lot, batiment_nom, client in rows:
+        client_name = f"{client.last_name} {client.first_name}".strip() if client else None
+        acquereur = client_name or lot.acquereur or ""
+        data_rows.append([
+            batiment_nom,
+            lot.lot,
+            lot.niveau,
+            lot.type,
+            lot.surface_sol,
+            lot.sha_m2,
+            lot.prix_logement,
+            lot.prix_stationnement,
+            lot.prix_total,
+            lot.prix_m2_appartement,
+            lot.prix_m2_appart_parking,
+            lot.statut,
+            lot.date_reservation,
+            lot.date_acte,
+            acquereur,
+        ])
+
+    filename = f"export_{_slugify(prog.nom)}_{date.today().isoformat()}.xlsx"
+    return _build_xlsx_response(headers, data_rows, prog.nom or "Programme", filename, price_columns)
+
+
 # ----------------- BÃ¢timents -----------------
 
 @app.get("/batiments", response_model=list[BatimentRead])
@@ -662,56 +778,6 @@ def dashboard_stats(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/lots/export")
-def export_lots_csv(programme_id: int = Query(...), db: Session = Depends(get_db)):
-    import csv
-    from io import StringIO
-
-    batiments = db.query(Batiment).filter(Batiment.programme_id == programme_id).all()
-    bat_by_id = {b.id: b for b in batiments}
-    bat_ids = list(bat_by_id.keys())
-    lots = db.query(Lot).filter(Lot.batiment_id.in_(bat_ids)).order_by(Lot.id.asc()).all() if bat_ids else []
-
-    headers = [
-        "batiment_nom",
-        "lot",
-        "niveau",
-        "type",
-        "surface_sol",
-        "sha_m2",
-        "orientation",
-        "garage",
-        "parking1",
-        "parking2",
-        "cave",
-        "jardin",
-        "terrasse",
-        "prix_logement",
-        "prix_stationnement",
-        "prix_total",
-        "prix_m2_appartement",
-        "prix_m2_appart_parking",
-        "acquereur",
-        "statut",
-    ]
-    bool_fields = {"garage", "parking1", "parking2", "cave"}
-    buf = StringIO()
-    writer = csv.DictWriter(buf, fieldnames=headers)
-    writer.writeheader()
-    for l in lots:
-        row = {}
-        for h in headers:
-            if h == "batiment_nom":
-                row[h] = bat_by_id[l.batiment_id].nom if l.batiment_id in bat_by_id else ""
-            elif h in bool_fields:
-                row[h] = "Oui" if getattr(l, h) else "Non"
-            else:
-                row[h] = getattr(l, h)
-        writer.writerow(row)
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=lots_programme_{programme_id}.csv"})
-
-
 from fastapi import UploadFile, File
 
 
@@ -872,6 +938,21 @@ def _compute_stats(lots: list[Lot]) -> LotsStatistics:
 from backend.schemas import ClientCreate, ClientRead, ClientBasic, ClientUpdate
 
 
+def _format_prog_lot(items: list[tuple[str | None, str | None]]) -> tuple[str | None, str | None]:
+    """Combine a client's (programme_name, lot_label) pairs into the two
+    display fields of ClientRead. Single programme -> unchanged shape
+    (programme_name + comma-joined lot labels). Several programmes -> fold
+    everything into lot_label as "Programme / Lot" pairs."""
+    if not items:
+        return None, None
+    programmes = {p for p, _ in items if p}
+    if len(programmes) <= 1:
+        programme_name = next(iter(programmes), None)
+        lot_label = ", ".join(l for _, l in items if l) or None
+        return programme_name, lot_label
+    return None, ", ".join(f"{p} / {l}" for p, l in items if l)
+
+
 @app.get("/clients", response_model=list[ClientRead])
 def list_clients(db: Session = Depends(get_db)):
     rows = (
@@ -889,7 +970,6 @@ def list_clients(db: Session = Depends(get_db)):
             Client.email2,
             Client.origin,
             Client.partner_id,
-            Programme.id.label("programme_id"),
             Programme.nom.label("programme_name"),
             Lot.id.label("lot_id"),
             Lot.lot.label("lot_label"),
@@ -898,16 +978,50 @@ def list_clients(db: Session = Depends(get_db)):
         .outerjoin(Lot, Lot.client_id == Client.id)
         .outerjoin(Batiment, Batiment.id == Lot.batiment_id)
         .outerjoin(Programme, Programme.id == Batiment.programme_id)
-        .order_by(Client.id.desc(), Lot.id.desc())
+        .order_by(Client.id.desc())
         .all()
     )
-    # Build a lookup of basic partner info (nom/prenom/email/tel) to embed
-    # in each row without adding extra lines for the linked client. We keep
-    # every Client row in the response (no filtering out of "partner" rows):
-    # a couple is stored as two independent Client rows, but the frontend
-    # only needs a single line per couple with the partner's info attached,
-    # so we let the caller decide how to group/display it.
-    partner_ids = {r.partner_id for r in rows if r.partner_id}
+
+    # Un client peut avoir plusieurs lots : on les agrege par client_id
+    # (une ligne par client, pas une ligne par lot).
+    base_by_client = {}
+    lots_by_client: dict[int, list[tuple[str | None, str | None]]] = {}
+    seen_lot_keys = set()
+    for r in rows:
+        base_by_client.setdefault(r.id, r)
+        if r.lot_id and (r.id, r.lot_id) not in seen_lot_keys:
+            seen_lot_keys.add((r.id, r.lot_id))
+            lots_by_client.setdefault(r.id, []).append((r.programme_name, r.lot_label))
+
+    # Rattachement additionnel par texte libre (lots.acquereur) quand le lot
+    # n'a pas de client_id : ajoute au client trouve par nom/email plutot
+    # que de creer une ligne supplementaire pour ce meme client.
+    unmatched_lots = (
+        db.query(Lot, Programme)
+        .select_from(Lot)
+        .outerjoin(Batiment, Batiment.id == Lot.batiment_id)
+        .outerjoin(Programme, Programme.id == Batiment.programme_id)
+        .filter(Lot.client_id.is_(None))
+        .filter(Lot.acquereur.isnot(None))
+        .all()
+    )
+    all_clients = list(base_by_client.values())
+    for lot, prog in unmatched_lots:
+        aq = (lot.acquereur or "").strip().lower()
+        if not aq:
+            continue
+        for c in all_clients:
+            name1 = f"{(c.last_name or '').strip()} {(c.first_name or '').strip()}".strip().lower()
+            name2 = f"{(c.first_name or '').strip()} {(c.last_name or '').strip()}".strip().lower()
+            email = (c.email or "").strip().lower()
+            if (name1 and name1 in aq) or (name2 and name2 in aq) or (email and email == aq):
+                if (c.id, lot.id) not in seen_lot_keys:
+                    seen_lot_keys.add((c.id, lot.id))
+                    lots_by_client.setdefault(c.id, []).append((getattr(prog, "nom", None), lot.lot))
+                break
+
+    # Lookup partner info (nom/prenom/email/tel) a embarquer sur la ligne du client.
+    partner_ids = {r.partner_id for r in base_by_client.values() if r.partner_id}
     partners_by_id = {}
     if partner_ids:
         for p in db.query(Client).filter(Client.id.in_(partner_ids)).all():
@@ -921,11 +1035,20 @@ def list_clients(db: Session = Depends(get_db)):
                 "phone": p.phone,
                 "partner_id": p.partner_id,
             }
+
     result = []
-    seen = set()
-    for r in rows:
-        key = (r.id, r.lot_id)
-        seen.add(key)
+    for cid, r in sorted(base_by_client.items(), key=lambda kv: -kv[0]):
+        # Un couple = 2 clients distincts, lies reciproquement : on n'affiche
+        # qu'une seule ligne (celle du plus petit id) pour eviter d'afficher
+        # deux lignes "A + B" / "B + A" pour le meme couple.
+        if r.partner_id and r.partner_id in base_by_client and r.partner_id < cid:
+            continue
+
+        combined_lots = list(lots_by_client.get(cid, []))
+        if r.partner_id:
+            combined_lots += lots_by_client.get(r.partner_id, [])
+        programme_name, lot_label = _format_prog_lot(combined_lots)
+
         result.append({
             "id": r.id,
             "civility": r.civility,
@@ -941,54 +1064,11 @@ def list_clients(db: Session = Depends(get_db)):
             "origin": r.origin,
             "partner_id": r.partner_id,
             "partner": partners_by_id.get(r.partner_id) if r.partner_id else None,
-            "programme_id": r.programme_id,
-            "programme_name": r.programme_name,
-            "lot_id": r.lot_id,
-            "lot_label": r.lot_label,
+            "programme_id": None,
+            "programme_name": programme_name,
+            "lot_id": None,
+            "lot_label": lot_label,
         })
-    # Also associate by text match on lots.acquereur when client_id is NULL
-    unmatched_lots = (
-        db.query(Lot, Batiment, Programme)
-        .select_from(Lot)
-        .outerjoin(Batiment, Batiment.id == Lot.batiment_id)
-        .outerjoin(Programme, Programme.id == Batiment.programme_id)
-        .filter(Lot.client_id.is_(None))
-        .filter(Lot.acquereur.isnot(None))
-        .all()
-    )
-    clients = db.query(Client).all()
-    for lot, bat, prog in unmatched_lots:
-        aq = (lot.acquereur or "").strip().lower()
-        if not aq:
-            continue
-        for c in clients:
-            name1 = f"{(c.last_name or '').strip()} {(c.first_name or '').strip()}".strip().lower()
-            name2 = f"{(c.first_name or '').strip()} {(c.last_name or '').strip()}".strip().lower()
-            email = (c.email or "").strip().lower()
-            if (name1 and name1 in aq) or (name2 and name2 in aq) or (email and email == aq):
-                key = (c.id, lot.id)
-                if key in seen:
-                    continue
-                seen.add(key)
-                result.append({
-                    "id": c.id,
-                    "civility": c.civility,
-                    "type": c.type,
-                    "last_name": c.last_name,
-                    "first_name": c.first_name,
-                    "address": c.address,
-                    "address2": c.address2,
-                    "phone": c.phone,
-                    "phone2": c.phone2,
-                    "email": c.email,
-                    "email2": c.email2,
-                    "origin": c.origin,
-                    "programme_id": getattr(prog, 'id', None),
-                    "programme_name": getattr(prog, 'nom', None),
-                    "lot_id": lot.id,
-                    "lot_label": lot.lot,
-                })
-                break
     return result
 
 
@@ -1014,6 +1094,50 @@ def _client_to_dict(c: Client) -> dict:
     }
 
 
+def _link_partner(db: Session, c: Client, partner_payload: "ClientCreate") -> None:
+    partner_data = partner_payload.model_dump(exclude_none=True, exclude={"partner"})
+    raw_partner_type = (partner_data.get("type") or "prospect").strip().lower()
+    if raw_partner_type not in ("prospect", "acquereur"):
+        raw_partner_type = "prospect"
+    partner_data["type"] = raw_partner_type
+
+    # Si un conjoint est deja rattache, on le met a jour lui precisement
+    # plutot que de relancer une recherche floue (find_or_create_client ne
+    # retrouve pas un conjoint sans email ni telephone -> creerait un
+    # doublon a chaque re-enregistrement, meme sans rien changer au formulaire).
+    partner = db.get(Client, c.partner_id) if c.partner_id else None
+    if partner is not None:
+        for key, value in partner_data.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and value.strip() == "":
+                continue
+            setattr(partner, key, value)
+    else:
+        partner = find_or_create_client(db, partner_data)
+
+    c.partner_id = partner.id
+    partner.partner_id = c.id
+
+
+def _partner_read_dict(partner_obj: Client) -> dict:
+    return {
+        "id": partner_obj.id,
+        "civility": partner_obj.civility,
+        "type": partner_obj.type,
+        "last_name": partner_obj.last_name,
+        "first_name": partner_obj.first_name,
+        "address": partner_obj.address,
+        "address2": partner_obj.address2,
+        "phone": partner_obj.phone,
+        "phone2": partner_obj.phone2,
+        "email": partner_obj.email,
+        "email2": partner_obj.email2,
+        "origin": partner_obj.origin,
+        "partner_id": partner_obj.partner_id,
+    }
+
+
 @app.post("/clients", response_model=ClientRead, status_code=201)
 def create_client(payload: ClientCreate, db: Session = Depends(get_db)):
     partner_payload = payload.partner
@@ -1025,14 +1149,7 @@ def create_client(payload: ClientCreate, db: Session = Depends(get_db)):
     c = find_or_create_client(db, data)
 
     if partner_payload is not None:
-        partner_data = partner_payload.model_dump(exclude_none=True, exclude={"partner"})
-        raw_partner_type = (partner_data.get("type") or "prospect").strip().lower()
-        if raw_partner_type not in ("prospect", "acquereur"):
-            raw_partner_type = "prospect"
-        partner_data["type"] = raw_partner_type
-        partner = find_or_create_client(db, partner_data)
-        c.partner_id = partner.id
-        partner.partner_id = c.id
+        _link_partner(db, c, partner_payload)
 
     db.commit()
     db.refresh(c)
@@ -1040,21 +1157,7 @@ def create_client(payload: ClientCreate, db: Session = Depends(get_db)):
     if c.partner_id:
         partner_obj = db.get(Client, c.partner_id)
         if partner_obj:
-            result["partner"] = {
-                "id": partner_obj.id,
-                "civility": partner_obj.civility,
-                "type": partner_obj.type,
-                "last_name": partner_obj.last_name,
-                "first_name": partner_obj.first_name,
-                "address": partner_obj.address,
-                "address2": partner_obj.address2,
-                "phone": partner_obj.phone,
-                "phone2": partner_obj.phone2,
-                "email": partner_obj.email,
-                "email2": partner_obj.email2,
-                "origin": partner_obj.origin,
-                "partner_id": partner_obj.partner_id,
-            }
+            result["partner"] = _partner_read_dict(partner_obj)
     return result
 
 
@@ -1063,16 +1166,26 @@ def update_client(client_id: int, payload: ClientUpdate, db: Session = Depends(g
     c = db.get(Client, client_id)
     if not c:
         raise HTTPException(status_code=404, detail="Client not found")
-    data = payload.model_dump(exclude_none=True)
+    partner_payload = payload.partner
+    data = payload.model_dump(exclude_none=True, exclude={"partner"})
     if "type" in data:
         raw_type = (data.get("type") or "prospect").strip().lower()
         data["type"] = raw_type if raw_type in ("prospect", "acquereur") else "prospect"
     for k, v in data.items():
         setattr(c, k, v)
+
+    if partner_payload is not None:
+        _link_partner(db, c, partner_payload)
+
     db.add(c)
     db.commit()
     db.refresh(c)
-    return _client_to_dict(c)
+    result = _client_to_dict(c)
+    if c.partner_id:
+        partner_obj = db.get(Client, c.partner_id)
+        if partner_obj:
+            result["partner"] = _partner_read_dict(partner_obj)
+    return result
 
 
 @app.get("/clients/all", response_model=list[ClientBasic])
@@ -1089,6 +1202,44 @@ def list_clients_basic(db: Session = Depends(get_db)):
             email=c.email,
         ))
     return out
+
+
+@app.get("/clients/export")
+def export_clients_xlsx(db: Session = Depends(get_db)):
+    """Export lecture seule de la base clients au format xlsx (aucune ecriture en base).
+    Un client par ligne (contrairement a GET /clients, qui joint les lots et
+    duplique une ligne par lot rattache)."""
+    from datetime import date
+
+    clients = db.query(Client).order_by(Client.last_name.asc(), Client.first_name.asc()).all()
+    by_id = {c.id: c for c in clients}
+
+    headers = [
+        "Civilité", "Nom", "Prénom", "Email 1", "Email 2", "Tél 1", "Tél 2",
+        "Adresse", "Code postal", "Ville", "Type", "Conjoint",
+    ]
+
+    data_rows = []
+    for c in clients:
+        partner = by_id.get(c.partner_id) if c.partner_id else None
+        conjoint = f"{partner.last_name} {partner.first_name}".strip() if partner else ""
+        data_rows.append([
+            c.civility,
+            c.last_name,
+            c.first_name,
+            c.email,
+            c.email2,
+            c.phone,
+            c.phone2,
+            c.address,
+            None,  # pas de colonne code postal separee en base
+            None,  # pas de colonne ville separee en base
+            c.type,
+            conjoint,
+        ])
+
+    filename = f"export_clients_{date.today().isoformat()}.xlsx"
+    return _build_xlsx_response(headers, data_rows, "Clients", filename)
 
 
 @app.delete("/clients/{client_id}", status_code=204)

@@ -262,6 +262,7 @@ class ClientUpdate(BaseModel):
     email2: EmailStr | None = None
     origin: str | None = None
     partner_id: int | None = None
+    partner: "ClientCreate | None" = None
 
 
 class ClientPartnerRead(BaseModel):

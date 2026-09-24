@@ -5,9 +5,7 @@ export default function StatsBar({ stats }) {
   const actes = stats?.actes ?? 0
   const options = stats?.options ?? 0
   const reservations = stats?.reservations ?? 0
-  // Libres est calculé par soustraction pour cohérence visuelle
-  const occupied = actes + options + reservations
-  const libres = Math.max(0, total - occupied)
+  const libres = stats?.libres ?? 0
 
   const caTotal = stats?.ca_total ?? 0
   const caActes = stats?.ca_actes ?? 0
@@ -20,7 +18,7 @@ export default function StatsBar({ stats }) {
 
   return (
     <div className="card">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-start mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 items-start mb-4">
         <div>
           <div className="text-sm text-gray-600 mb-1">Lots</div>
           <div className="text-2xl font-bold text-gray-800">{total}</div>
@@ -48,6 +46,10 @@ export default function StatsBar({ stats }) {
           <div className="text-2xl font-bold text-green-600">{options} <span className="text-sm font-normal text-gray-500">({getPct(options)}%)</span></div>
         </div>
         <div>
+          <div className="text-sm text-gray-600 mb-1">Disponibles</div>
+          <div className="text-2xl font-bold text-gray-500">{libres} <span className="text-sm font-normal text-gray-500">({getPct(libres)}%)</span></div>
+        </div>
+        <div>
           <div className="text-sm text-gray-600 mb-1">CA total</div>
           <div className="text-2xl font-bold text-gray-800">{formatEuro(caTotal)}</div>
           <div className="text-xs text-gray-500 mt-1">
@@ -69,7 +71,6 @@ export default function StatsBar({ stats }) {
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600"></span> Réservés</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-600"></span> Options</span>
         </div>
-        <span>Libres: {libres}</span>
       </div>
     </div>
   )

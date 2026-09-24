@@ -177,7 +177,7 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
             email2: form.email2 || null,
             origin: form.origin || null
         }
-        if (!isEditing && hasPartner && (partner.last_name.trim() || partner.first_name.trim())) {
+        if (hasPartner && (partner.last_name.trim() || partner.first_name.trim())) {
             payload.partner = {
                 civility: partner.civility || null,
                 type: form.type,
@@ -291,18 +291,16 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
                     ))}
                 </select>
 
-                {!isEditing && (
-                    <div className="col-span-4 border-t pt-3 mt-2">
-                        <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={hasPartner}
-                                onChange={(e) => setHasPartner(e.target.checked)}
-                            />
-                            Ajouter un(e) conjoint(e)
-                        </label>
-                    </div>
-                )}
+                <div className="col-span-4 border-t pt-3 mt-2">
+                    <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={hasPartner}
+                            onChange={(e) => setHasPartner(e.target.checked)}
+                        />
+                        Ajouter un(e) conjoint(e)
+                    </label>
+                </div>
                 {hasPartner && (
                     <div className="col-span-4 grid grid-cols-4 gap-3 border p-3 rounded bg-gray-50">
                         <div className="col-span-4 text-xs font-semibold text-gray-500">Conjoint(e)</div>
