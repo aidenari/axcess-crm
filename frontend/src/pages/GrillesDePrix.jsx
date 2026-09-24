@@ -282,7 +282,7 @@ export default function GrillesDePrix() {
           <div>
             <label className="text-sm text-gray-600 mr-2">Statut</label>
             <select className="input" value={filters.statut} onChange={(e) => setFilters(f => ({ ...f, statut: e.target.value }))}>
-              {['Tous', 'Libre', 'Option', 'Réservation', 'Acté'].map(s => <option key={s} value={s}>{s}</option>)}
+              {['Tous', 'Libre', 'Option', 'Réservé', 'Acté'].map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
           <div>

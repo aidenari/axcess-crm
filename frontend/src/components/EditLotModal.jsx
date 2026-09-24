@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Modal from './Modal.jsx'
 import ClientDrawer from './ClientDrawer.jsx'
-import api from '../api/axios'
+import api, { apiErrorMessage } from '../api/axios'
 import { Plus, Trash2 } from 'lucide-react'
 
 const ANNEXE_TYPES = ['Garage', 'Carport', 'Parking', 'Cave']
@@ -51,11 +51,25 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
   const [newAnnexeType, setNewAnnexeType] = useState('Garage')
   const [newAnnexeNumero, setNewAnnexeNumero] = useState('')
   const [annexeAdding, setAnnexeAdding] = useState(false)
+  const [annexeError, setAnnexeError] = useState(null)
+  // Annexes écrites en base depuis l'ouverture : la grille doit recharger
+  // même si la fenêtre est fermée sans "Enregistrer".
+  const [annexesChanged, setAnnexesChanged] = useState(false)
 
   useEffect(() => {
     setForm(toForm(lot))
     setAnnexes(lot?.annexes ?? [])
+    setAnnexeError(null)
+    setAnnexesChanged(false)
+    setNewAnnexeNumero('')
   }, [lot?.id])
+
+  const annexeErrorRef = useRef(null)
+  useEffect(() => {
+    if (annexeError) annexeErrorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [annexeError])
+
+  const handleClose = () => onClose?.({ annexesChanged })
 
   useEffect(() => {
     if (!open) return
@@ -91,29 +105,37 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
     })
   }
 
+  // Envoie l'annexe en cours de saisie. Renvoie l'annexe créée, ou null en
+  // cas d'échec (l'erreur est alors affichée dans le bloc Annexes).
   const addAnnexe = async () => {
-    if (!lot?.id) return
+    if (!lot?.id) return null
     setAnnexeAdding(true)
+    setAnnexeError(null)
     try {
       const { data } = await api.post(`/lots/${lot.id}/annexes`, {
         type: newAnnexeType,
         numero: newAnnexeNumero.trim() || null,
       })
       setAnnexes(prev => [...prev, data])
+      setAnnexesChanged(true)
       setNewAnnexeNumero('')
+      return data
     } catch (e) {
-      console.error(e)
+      setAnnexeError(apiErrorMessage(e, `L'annexe ${newAnnexeType} ${newAnnexeNumero.trim()} n'a pas été enregistrée.`))
+      return null
     } finally {
       setAnnexeAdding(false)
     }
   }
 
   const removeAnnexe = async (annexeId) => {
+    setAnnexeError(null)
     try {
       await api.delete(`/annexes/${annexeId}`)
       setAnnexes(prev => prev.filter(a => a.id !== annexeId))
+      setAnnexesChanged(true)
     } catch (e) {
-      console.error(e)
+      setAnnexeError(apiErrorMessage(e, "L'annexe n'a pas été supprimée."))
     }
   }
 
@@ -122,6 +144,15 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
     if (!lot?.id) return
     setLoading(true)
     try {
+      // Annexe saisie mais "Ajouter l'annexe" pas cliqué : on l'envoie d'abord.
+      // Si l'envoi échoue, le lot n'est pas enregistré et la fenêtre reste ouverte.
+      let savedAnnexes = annexes
+      if (newAnnexeNumero.trim()) {
+        const created = await addAnnexe()
+        if (!created) return
+        savedAnnexes = [...annexes, created]
+      }
+
       const payload = {
         ...form,
         client_id: form.client_ids?.[0] ?? null,
@@ -140,7 +171,7 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
       }
 
       const { data } = await api.put(`/lots/${lot.id}`, payload)
-      onSaved?.({ ...(data || { ...lot, ...payload }), annexes })
+      onSaved?.({ ...(data || { ...lot, ...payload }), annexes: savedAnnexes })
       onClose?.()
     } catch (e) {
       console.error(e)
@@ -188,7 +219,7 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
 
   return (
     <>
-      <Modal open={open} onClose={onClose} title="Modifier le lot">
+      <Modal open={open} onClose={handleClose} title="Modifier le lot">
         <form onSubmit={submit} className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm mb-1">Lot</label>
@@ -274,6 +305,11 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
               <Plus size={16} />
               {annexeAdding ? 'Ajout en cours...' : "Ajouter l'annexe"}
             </button>
+            {annexeError && (
+              <div ref={annexeErrorRef} className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert">
+                {annexeError}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4 col-span-2 flex-wrap">
             <label className="flex items-center gap-2"><input type="checkbox" name="hasJardin" checked={form.hasJardin} onChange={onChange} /> Jardin</label>
@@ -395,7 +431,7 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
               Supprimer le lot
             </button>
             <div className="flex gap-2">
-              <button type="button" onClick={onClose} className="btn bg-white border border-gray-300 text-gray-700 hover:bg-gray-50">Annuler</button>
+              <button type="button" onClick={handleClose} className="btn bg-white border border-gray-300 text-gray-700 hover:bg-gray-50">Annuler</button>
               <button className="btn bg-blue-600 hover:bg-blue-700 text-white" disabled={loading}>
                 {loading ? 'Enregistrement...' : 'Enregistrer'}
               </button>

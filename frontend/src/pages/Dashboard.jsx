@@ -83,7 +83,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="border rounded-lg p-4 bg-white">
             <div className="text-gray-500">Lots dispo</div>
             <div className="text-2xl font-semibold">{counts.disponible || 0}</div>
@@ -99,10 +99,6 @@ export default function Dashboard() {
           <div className="border rounded-lg p-4 bg-white">
             <div className="text-gray-500">Acte</div>
             <div className="text-2xl font-semibold">{counts.acte || 0}</div>
-          </div>
-          <div className="border rounded-lg p-4 bg-white">
-            <div className="text-gray-500">Transit</div>
-            <div className="text-2xl font-semibold">{counts.transit || 0}</div>
           </div>
         </div>
 

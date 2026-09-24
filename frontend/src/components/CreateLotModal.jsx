@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import Modal from './Modal.jsx'
-import api from '../api/axios'
+import api, { apiErrorMessage } from '../api/axios'
 import { Trash2 } from 'lucide-react'
 
 const ANNEXE_TYPES = ['Garage', 'Carport', 'Parking', 'Cave']
@@ -32,6 +32,29 @@ export default function CreateLotModal({ open, onClose, batimentId, onCreated })
   const [pendingAnnexes, setPendingAnnexes] = useState([])
   const [newAnnexeType, setNewAnnexeType] = useState('Garage')
   const [newAnnexeNumero, setNewAnnexeNumero] = useState('')
+  const [error, setError] = useState(null)
+  // Lot déjà créé lors d'une tentative dont une annexe a échoué : on ne le
+  // recrée pas au nouvel essai, on renvoie seulement les annexes restantes.
+  const [createdLot, setCreatedLot] = useState(null)
+  const [createdAnnexes, setCreatedAnnexes] = useState([])
+
+  const reset = () => {
+    setForm(empty(batimentId))
+    setPendingAnnexes([])
+    setNewAnnexeNumero('')
+    setError(null)
+    setCreatedLot(null)
+    setCreatedAnnexes([])
+  }
+
+  const handleClose = () => {
+    // Fermeture après création partielle : la grille doit quand même afficher le lot.
+    if (createdLot) {
+      onCreated?.({ ...createdLot, annexes: createdAnnexes })
+      reset()
+    }
+    onClose?.()
+  }
 
   const onChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -52,51 +75,80 @@ export default function CreateLotModal({ open, onClose, batimentId, onCreated })
 
   const submit = async (e) => {
     e.preventDefault()
+    setError(null)
     setLoading(true)
+
+    // Annexe saisie mais "+ Ajouter" pas cliqué : on l'ajoute aux annexes à envoyer.
+    let toSend = pendingAnnexes
+    if (newAnnexeNumero.trim()) {
+      toSend = [...pendingAnnexes, { _key: Date.now(), type: newAnnexeType, numero: newAnnexeNumero.trim() }]
+      setPendingAnnexes(toSend)
+      setNewAnnexeNumero('')
+    }
+
     try {
-      const payload = {
-        ...form,
-        batiment_id: batimentId,
-        surface_sol: form.surface_sol ? Number(form.surface_sol) : null,
-        sha_m2: form.sha_m2 ? Number(form.sha_m2) : null,
-        jardin: form.jardin ? Number(form.jardin) : null,
-        terrasse: form.terrasse ? Number(form.terrasse) : null,
-        prix_logement: form.prix_logement ? Number(form.prix_logement) : null,
-        prix_stationnement: form.prix_stationnement ? Number(form.prix_stationnement) : null,
-        prix_total: form.prix_total ? Number(form.prix_total) : null,
-        prix_m2_appartement: form.prix_m2_appartement ? Number(form.prix_m2_appartement) : null,
-        prix_m2_appart_parking: form.prix_m2_appart_parking ? Number(form.prix_m2_appart_parking) : null,
+      let newLot = createdLot
+      if (!newLot) {
+        const payload = {
+          ...form,
+          batiment_id: batimentId,
+          surface_sol: form.surface_sol ? Number(form.surface_sol) : null,
+          sha_m2: form.sha_m2 ? Number(form.sha_m2) : null,
+          jardin: form.jardin ? Number(form.jardin) : null,
+          terrasse: form.terrasse ? Number(form.terrasse) : null,
+          prix_logement: form.prix_logement ? Number(form.prix_logement) : null,
+          prix_stationnement: form.prix_stationnement ? Number(form.prix_stationnement) : null,
+          prix_total: form.prix_total ? Number(form.prix_total) : null,
+          prix_m2_appartement: form.prix_m2_appartement ? Number(form.prix_m2_appartement) : null,
+          prix_m2_appart_parking: form.prix_m2_appart_parking ? Number(form.prix_m2_appart_parking) : null,
+        }
+        try {
+          const { data } = await api.post('/lots', payload)
+          newLot = data
+          setCreatedLot(data)
+        } catch (e) {
+          setError(apiErrorMessage(e, "Le lot n'a pas été créé."))
+          return
+        }
       }
-      const { data: newLot } = await api.post('/lots', payload)
 
       // Créer les annexes en attente
-      const createdAnnexes = []
-      for (const a of pendingAnnexes) {
+      const saved = [...createdAnnexes]
+      const failed = []
+      let lastError = null
+      for (const a of toSend) {
         try {
           const { data: ann } = await api.post(`/lots/${newLot.id}/annexes`, {
             type: a.type,
             numero: a.numero,
           })
-          createdAnnexes.push(ann)
+          saved.push(ann)
         } catch (e) {
-          console.error('Erreur création annexe', e)
+          failed.push(a)
+          lastError = e
         }
       }
+      setCreatedAnnexes(saved)
 
-      onCreated?.({ ...newLot, annexes: createdAnnexes })
+      if (failed.length) {
+        // On ne ferme pas : les annexes en échec restent dans la liste pour un nouvel essai.
+        setPendingAnnexes(failed)
+        const list = failed.map(a => `${a.type}${a.numero ? ' ' + a.numero : ''}`).join(', ')
+        const cause = apiErrorMessage(lastError, 'Erreur serveur.')
+        setError(`Le lot ${newLot.lot || ''} a été créé, mais ces annexes n'ont pas été enregistrées : ${list}. ${cause} Cliquez sur « Réessayer les annexes ».`)
+        return
+      }
+
+      onCreated?.({ ...newLot, annexes: saved })
+      reset()
       onClose?.()
-      setForm(empty(batimentId))
-      setPendingAnnexes([])
-      setNewAnnexeNumero('')
-    } catch (e) {
-      console.error(e)
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Créer un lot">
+    <Modal open={open} onClose={handleClose} title="Créer un lot">
       <form onSubmit={submit} className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-sm mb-1">Lot</label>
@@ -198,12 +250,19 @@ export default function CreateLotModal({ open, onClose, batimentId, onCreated })
           <select className="input" name="statut" value={form.statut} onChange={onChange}>
             <option>Libre</option>
             <option>Option</option>
-            <option>Réservation</option>
+            <option>Réservé</option>
             <option>Acté</option>
           </select>
         </div>
+        {error && (
+          <div className="col-span-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert">
+            {error}
+          </div>
+        )}
         <div className="col-span-2 text-right">
-          <button className="btn" disabled={loading}>{loading ? 'Création...' : 'Créer'}</button>
+          <button className="btn" disabled={loading}>
+            {loading ? 'Création...' : (createdLot ? 'Réessayer les annexes' : 'Créer')}
+          </button>
         </div>
       </form>
     </Modal>

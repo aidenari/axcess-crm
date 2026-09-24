@@ -262,7 +262,10 @@ export default function LotsList() {
 
       <EditLotModal
         open={!!editingLot}
-        onClose={() => setEditingLot(null)}
+        onClose={(result) => {
+          setEditingLot(null)
+          if (result?.annexesChanged) load()
+        }}
         lot={editingLot}
         onSaved={handleSaved}
       />

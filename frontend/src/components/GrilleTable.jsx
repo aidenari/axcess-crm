@@ -159,7 +159,11 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
       </div>
 
       <CreateLotModal open={open} onClose={() => setOpen(false)} batimentId={batiment.id} onCreated={addLotLocal} />
-      <EditLotModal open={!!editing} onClose={() => setEditing(null)} lot={editing}
+      <EditLotModal open={!!editing} lot={editing}
+        onClose={(result) => {
+          setEditing(null)
+          if (result?.annexesChanged) load()
+        }}
         onSaved={(updated) => {
           if (!updated?.id) return
           setLots(prev => prev.map(x => x.id === updated.id ? { ...x, ...updated } : x))

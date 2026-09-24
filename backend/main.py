@@ -33,6 +33,7 @@ from backend.schemas import (
     LotUpdate,
     LotRead,
     LotsStatistics,
+    LOT_STATUTS,
     AnnexeCreate,
     AnnexeRead,
 )
@@ -717,6 +718,7 @@ def _normalize_lot_status(value: str | None) -> str:
         "option": "option",
         "reserve": "reserve",
         "reservé": "reserve",
+        "réservé": "reserve",
         "reserver": "reserve",
         "reservation": "reserve",
         "réservation": "reserve",
@@ -737,7 +739,7 @@ def dashboard_stats(db: Session = Depends(get_db)):
         .order_by(Lot.id.desc())
         .all()
     )
-    counts = {"disponible": 0, "option": 0, "reserve": 0, "acte": 0, "transit": 0}
+    counts = {"disponible": 0, "option": 0, "reserve": 0, "acte": 0}
     ca_total = 0.0
     ca_encaisse = 0.0
     lots_disponibles = []
@@ -752,8 +754,6 @@ def dashboard_stats(db: Session = Depends(get_db)):
             counts["option"] += 1
         elif statut == "reserve":
             counts["reserve"] += 1
-        elif statut == "transit":
-            counts["transit"] += 1
         else:
             counts["disponible"] += 1
         if statut != "acte":
@@ -805,6 +805,22 @@ async def import_lots_csv(programme_id: int = Query(...), db: Session = Depends(
     return await _import_lots_impl(programme_id, db, file=content)
 
 
+# Import CSV (tableur client) : alias tolérés -> statut canonique. Clés en minuscules.
+_CSV_STATUT_ALIASES = {
+    "libre": "Libre",
+    "disponible": "Libre",
+    "option": "Option",
+    "réservé": "Réservé",
+    "réservation": "Réservé",
+    "reserve": "Réservé",
+    "reservation": "Réservé",
+    "reservé": "Réservé",
+    "reserv": "Réservé",
+    "acté": "Acté",
+    "acte": "Acté",
+}
+
+
 async def _import_lots_impl(programme_id: int, db: Session, file: bytes | None):
     from io import StringIO
     import csv
@@ -838,6 +854,13 @@ async def _import_lots_impl(programme_id: int, db: Session, file: bytes | None):
         if not lot_num:
             errors.append({"ligne": line_num, "raison": "numéro de lot manquant"})
             continue
+        raw_statut = (row.get("statut") or "").strip()
+        statut = None
+        if raw_statut:
+            statut = _CSV_STATUT_ALIASES.get(unicodedata.normalize("NFC", raw_statut).lower())
+            if statut is None:
+                errors.append({"ligne": line_num, "raison": f"statut inconnu {raw_statut!r} (attendu : {', '.join(LOT_STATUTS)})"})
+                continue
 
         if bat_nom not in by_name:
             new_bat = Batiment(nom=bat_nom, programme_id=programme_id)
@@ -852,6 +875,8 @@ async def _import_lots_impl(programme_id: int, db: Session, file: bytes | None):
         for k in ("lot", "niveau", "type", "orientation", "acquereur", "statut"):
             if k in row:
                 payload[k] = row[k] or None
+        if "statut" in row:
+            payload["statut"] = statut
 
         for k in ("surface_sol", "sha_m2", "jardin", "terrasse", "prix_logement", "prix_stationnement", "prix_total", "prix_m2_appartement", "prix_m2_appart_parking"):
             if row.get(k) not in (None, ""):

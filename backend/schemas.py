@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
+
+
+LOT_STATUTS = ("Libre", "Option", "Réservé", "Acté")
+
+
+def validate_lot_statut(value: str | None) -> str | None:
+    if value is not None and value not in LOT_STATUTS:
+        raise ValueError(f"statut invalide {value!r} (attendu : {', '.join(LOT_STATUTS)})")
+    return value
 
 
 class UserRegister(BaseModel):
@@ -159,6 +168,8 @@ class LotCreate(BaseModel):
     date_reservation: str | None = None
     date_acte: str | None = None
 
+    _check_statut = field_validator("statut")(validate_lot_statut)
+
 
 class LotUpdate(BaseModel):
     client_id: int | None = None
@@ -183,6 +194,14 @@ class LotUpdate(BaseModel):
     statut: str | None = None
     date_reservation: str | None = None
     date_acte: str | None = None
+
+    @field_validator("statut")
+    @classmethod
+    def _check_statut(cls, value: str | None) -> str | None:
+        # Un null explicite effacerait le statut en base (LotRead exige un str).
+        if value is None:
+            raise ValueError("statut ne peut pas être vide")
+        return validate_lot_statut(value)
 
 
 # --- Annexes ---
