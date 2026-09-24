@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import Modal from './Modal.jsx'
+import DateField from './DateField.jsx'
 import api, { apiErrorMessage } from '../api/axios'
 import { Trash2 } from 'lucide-react'
 
@@ -21,7 +22,10 @@ const empty = (batimentId) => ({
   prix_m2_appartement: '',
   prix_m2_appart_parking: '',
   acquereur: '',
-  statut: 'Libre'
+  statut: 'Libre',
+  date_option: '',
+  date_reservation: '',
+  date_acte: '',
 })
 
 export default function CreateLotModal({ open, onClose, batimentId, onCreated }) {
@@ -101,6 +105,9 @@ export default function CreateLotModal({ open, onClose, batimentId, onCreated })
           prix_total: form.prix_total ? Number(form.prix_total) : null,
           prix_m2_appartement: form.prix_m2_appartement ? Number(form.prix_m2_appartement) : null,
           prix_m2_appart_parking: form.prix_m2_appart_parking ? Number(form.prix_m2_appart_parking) : null,
+          date_option: form.date_option || null,
+          date_reservation: form.date_reservation || null,
+          date_acte: form.date_acte || null,
         }
         try {
           const { data } = await api.post('/lots', payload)
@@ -254,6 +261,9 @@ export default function CreateLotModal({ open, onClose, batimentId, onCreated })
             <option>Acté</option>
           </select>
         </div>
+        <DateField label="Date de mise en option" name="date_option" value={form.date_option} onChange={onChange} />
+        <DateField label="Date de réservation" name="date_reservation" value={form.date_reservation} onChange={onChange} />
+        <DateField label="Date de signature d'acte" name="date_acte" value={form.date_acte} onChange={onChange} />
         {error && (
           <div className="col-span-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert">
             {error}

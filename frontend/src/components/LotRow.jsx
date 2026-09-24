@@ -101,6 +101,7 @@ export default function LotRow({ lot, onUpdate, statusDisplayMap, statusSendMap,
             {stVal}
           </span>
         </td>
+        <td className="p-2 border whitespace-nowrap">{formatDate(lot.date_option) || '-'}</td>
         <td className="p-2 border whitespace-nowrap">{formatDate(lot.date_reservation) || '-'}</td>
         <td className="p-2 border whitespace-nowrap">{formatDate(lot.date_acte) || '-'}</td>
         <td className="p-2 border text-right">

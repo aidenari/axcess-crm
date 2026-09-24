@@ -105,6 +105,7 @@ class Lot(Base):
 
     acquereur: Mapped[str | None] = mapped_column(String(255), nullable=True)
     statut: Mapped[str] = mapped_column(String(20), default="Libre")
+    date_option: Mapped[str | None] = mapped_column(String(20), nullable=True)
     date_reservation: Mapped[str | None] = mapped_column(String(20), nullable=True)
     date_acte: Mapped[str | None] = mapped_column(String(20), nullable=True)
 

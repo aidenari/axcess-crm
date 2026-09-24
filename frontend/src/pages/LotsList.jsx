@@ -57,16 +57,45 @@ export default function LotsList() {
     const exportItems = items.filter(i => selectedIds.has(i.id))
     const source = exportItems.length > 0 ? exportItems : filteredItems
 
+    // Mêmes colonnes que l'export programme (GET /programmes/{id}/export),
+    // précédées du programme puisque cette liste en couvre plusieurs.
     const data = source.map(item => ({
       'Programme': item.programme_name || '-',
-      'Lot': item.lot,
+      'Bâtiment': item.batiment_name,
+      'N° lot': item.lot,
+      'Niveau': item.niveau,
       'Type': item.type,
-      'Prix Total': item.prix_total,
+      'Surface sol': item.surface_sol,
+      'SHA m²': item.sha_m2,
+      'Prix logement': item.prix_logement,
+      'Prix stationnement': item.prix_stationnement,
+      'Prix total': item.prix_total,
+      'Prix/m² appart': item.prix_m2_appartement,
+      'Prix/m² stationnement inclus': item.prix_m2_appart_parking,
       'Statut': item.statut,
+      'Date option': item.date_option,
+      'Date réservation': item.date_reservation,
+      'Date acte': item.date_acte,
       'Acquéreur': item.client_name || '-'
     }))
 
     const ws = XLSX.utils.json_to_sheet(data)
+
+    // Comme l'export programme : format monétaire sur les prix et largeurs
+    // ajustées (sinon Excel affiche ##### pour les montants formatés).
+    const headers = Object.keys(data[0] || {})
+    const priceColumns = ['Prix logement', 'Prix stationnement', 'Prix total', 'Prix/m² appart', 'Prix/m² stationnement inclus']
+    headers.forEach((h, c) => {
+      if (!priceColumns.includes(h)) return
+      for (let r = 1; r <= data.length; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })]
+        if (cell && cell.t === 'n') cell.z = '#,##0 €'
+      }
+    })
+    ws['!cols'] = headers.map(h => ({
+      wch: Math.max(h.length, ...data.map(row => String(row[h] ?? '').length)) + 2
+    }))
+
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Lots")
     XLSX.writeFile(wb, "lots_export.xlsx")
@@ -191,6 +220,8 @@ export default function LotsList() {
               <th className="p-3 text-left font-semibold">Prix Logement</th>
               <th className="p-3 text-left font-semibold">Prix Stat.</th>
               <th className="p-3 text-left font-semibold">Prix Total</th>
+              <th className="p-3 text-left font-semibold">Prix/m² appart</th>
+              <th className="p-3 text-left font-semibold">Prix/m² stationnement inclus</th>
               <th className="p-3 text-left font-semibold">Statut</th>
               <th className="p-3 text-left font-semibold">Acquéreur</th>
               <th className="p-3 text-right font-semibold">Actions</th>
@@ -213,6 +244,8 @@ export default function LotsList() {
                 <td className="p-3 text-sm text-gray-500">{formatMoney(lot.prix_logement)}</td>
                 <td className="p-3 text-sm text-gray-500">{formatMoney(lot.prix_stationnement)}</td>
                 <td className="p-3 text-sm font-medium text-blue-900">{formatMoney(lot.prix_total)}</td>
+                <td className="p-3 text-sm text-gray-500">{formatMoney(lot.prix_m2_appartement)}</td>
+                <td className="p-3 text-sm text-gray-500">{formatMoney(lot.prix_m2_appart_parking)}</td>
                 <td className="p-3">
                   <span className={`px-2 py-1 rounded-full text-xs font-semibold
                     ${(() => {
@@ -247,7 +280,7 @@ export default function LotsList() {
             ))}
             {filteredItems.length === 0 && (
               <tr>
-                <td colSpan="10" className="p-8 text-center text-gray-500">
+                <td colSpan="12" className="p-8 text-center text-gray-500">
                   Aucun lot ne correspond aux filtres.
                 </td>
               </tr>

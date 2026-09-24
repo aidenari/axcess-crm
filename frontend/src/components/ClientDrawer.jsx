@@ -20,6 +20,7 @@ function Drawer({ open, onClose, title, children }) {
 
 const emptyPartner = {
     civility: '', last_name: '', first_name: '', email: '', phone: '',
+    address: '', address2: '', sameAddress: true,
 }
 
 export default function ClientDrawer({ open, onClose, onSaved, editingClient = null }) {
@@ -71,13 +72,22 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
                     lot_id: editingClient.lot_id ? String(editingClient.lot_id) : '',
                 })
                 if (editingClient.partner) {
+                    const p = editingClient.partner
                     setHasPartner(true)
                     setPartner({
-                        civility: editingClient.partner.civility || '',
-                        last_name: editingClient.partner.last_name || '',
-                        first_name: editingClient.partner.first_name || '',
-                        email: editingClient.partner.email || '',
-                        phone: editingClient.partner.phone || '',
+                        civility: p.civility || '',
+                        last_name: p.last_name || '',
+                        first_name: p.first_name || '',
+                        email: p.email || '',
+                        phone: p.phone || '',
+                        address: p.address || '',
+                        address2: p.address2 || '',
+                        // Coché sauf si le conjoint a déjà une adresse différente :
+                        // on ne l'écrase pas à l'enregistrement.
+                        sameAddress: !p.address || (
+                            p.address === (editingClient.address || '') &&
+                            (p.address2 || '') === (editingClient.address2 || '')
+                        ),
                     })
                 } else {
                     setHasPartner(false)
@@ -138,8 +148,13 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
         }
     }, [cp])
 
+    // Complète l'adresse avec "CP Ville" sans effacer la rue déjà saisie.
+    // Un "CP Ville" déjà présent en fin d'adresse est remplacé, pas dupliqué.
     const onSelectCity = (city) => {
-        setForm(prev => ({ ...prev, address: `${cp} ${city} ` }))
+        setForm(prev => {
+            const street = (prev.address || '').replace(/\s*\b\d{5}\b[^\d]*$/, '').trim()
+            return { ...prev, address: `${street ? street + ' ' : ''}${cp} ${city}` }
+        })
         setCities([])
     }
 
@@ -157,10 +172,14 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
         }
     }
 
+    // SCI : la dénomination va dans last_name, pas de prénom. Tous les
+    // affichages font "nom prénom".trim(), donc seule la dénomination apparaît.
+    const isSci = form.civility === 'SCI'
+
     const saveClient = async (e) => {
         e.preventDefault()
-        if (!form.last_name.trim() || !form.first_name.trim() || !form.type) {
-            alert('Nom, prenom et type sont obligatoires')
+        if (isSci ? (!form.last_name.trim() || !form.type) : (!form.last_name.trim() || !form.first_name.trim() || !form.type)) {
+            alert(isSci ? 'Dénomination et type sont obligatoires' : 'Nom, prenom et type sont obligatoires')
             return
         }
         setLoading(true)
@@ -168,7 +187,7 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
             civility: form.civility || null,
             type: form.type,
             last_name: form.last_name,
-            first_name: form.first_name,
+            first_name: isSci ? '' : form.first_name,
             address: form.address || null,
             address2: form.address2 || null,
             phone: form.phone || null,
@@ -185,6 +204,8 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
                 first_name: partner.first_name,
                 email: partner.email || null,
                 phone: partner.phone || null,
+                address: (partner.sameAddress ? form.address : partner.address) || null,
+                address2: (partner.sameAddress ? form.address2 : partner.address2) || null,
             }
         }
         try {
@@ -226,10 +247,20 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
                             <input type="radio" name="civility" value="Mme" checked={form.civility === 'Mme'} onChange={onChange} />
                             Mme
                         </label>
+                        <label className="flex items-center gap-2 text-sm">
+                            <input type="radio" name="civility" value="SCI" checked={isSci} onChange={onChange} />
+                            SCI
+                        </label>
                     </div>
                 </div>
-                <input className="input col-span-2" name="last_name" placeholder="Nom" value={form.last_name} onChange={onChange} required />
-                <input className="input col-span-2" name="first_name" placeholder="Prénom" value={form.first_name} onChange={onChange} required />
+                {isSci ? (
+                    <input className="input col-span-4" name="last_name" placeholder="Dénomination (ex : SCI Les Pins)" value={form.last_name} onChange={onChange} required />
+                ) : (
+                    <>
+                        <input className="input col-span-2" name="last_name" placeholder="Nom" value={form.last_name} onChange={onChange} required />
+                        <input className="input col-span-2" name="first_name" placeholder="Prénom" value={form.first_name} onChange={onChange} required />
+                    </>
+                )}
                 <input className="input col-span-2" name="email" type="email" placeholder="Email" value={form.email} onChange={onChange} />
                 <input className="input col-span-2" name="email2" type="email" placeholder="Email 2 (Facultatif)" value={form.email2} onChange={onChange} />
 
@@ -307,11 +338,11 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
                         <div className="col-span-4">
                             <div className="flex items-center gap-4">
                                 <label className="flex items-center gap-2 text-sm">
-                                    <input type="radio" name="civility" value="M." checked={partner.civility === 'M.'} onChange={onPartnerChange} />
+                                    <input type="radio" name="partner_civility" value="M." checked={partner.civility === 'M.'} onChange={(e) => setPartner({ ...partner, civility: e.target.value })} />
                                     M.
                                 </label>
                                 <label className="flex items-center gap-2 text-sm">
-                                    <input type="radio" name="civility" value="Mme" checked={partner.civility === 'Mme'} onChange={onPartnerChange} />
+                                    <input type="radio" name="partner_civility" value="Mme" checked={partner.civility === 'Mme'} onChange={(e) => setPartner({ ...partner, civility: e.target.value })} />
                                     Mme
                                 </label>
                             </div>
@@ -320,6 +351,20 @@ export default function ClientDrawer({ open, onClose, onSaved, editingClient = n
                         <input className="input col-span-2" name="first_name" placeholder="Prénom" value={partner.first_name} onChange={onPartnerChange} />
                         <input className="input col-span-2" name="email" type="email" placeholder="Email" value={partner.email} onChange={onPartnerChange} />
                         <input className="input col-span-2" name="phone" placeholder="Téléphone" value={partner.phone} onChange={onPartnerChange} />
+                        <label className="col-span-4 flex items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                checked={partner.sameAddress}
+                                onChange={(e) => setPartner({ ...partner, sameAddress: e.target.checked })}
+                            />
+                            Même adresse que le titulaire
+                        </label>
+                        {!partner.sameAddress && (
+                            <>
+                                <input className="input col-span-4" name="address" placeholder="Adresse complète (Rue, Numéro, CP, Ville)" value={partner.address} onChange={onPartnerChange} />
+                                <input className="input col-span-4" name="address2" placeholder="Adresse 2 (Facultatif)" value={partner.address2} onChange={onPartnerChange} />
+                            </>
+                        )}
                     </div>
                 )}
 

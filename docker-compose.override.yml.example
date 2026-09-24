@@ -8,15 +8,21 @@
 # Local dev has no nginx reverse proxy: the frontend is built to call the
 # backend directly on localhost, and only db/backend/frontend are started
 # (see GUIDE_DEMARRAGE.md / README_DOCKER.md for the launch command).
+#
+# "ports: !override" REPLACES the prod ports of docker-compose.yml instead of
+# appending to them. Without it, Compose merges 0.0.0.0:<port> (prod) and
+# 127.0.0.1:<port> (here) into two bindings of the same port: the container
+# fails to attach to the network and the backend cannot resolve "db".
+# Requires Docker Compose >= 2.24.
 
 services:
   frontend:
     build:
       args:
         - VITE_API_URL=http://localhost:8000
-    ports:
+    ports: !override
       - "127.0.0.1:3000:3000"
 
   backend:
-    ports:
+    ports: !override
       - "127.0.0.1:8000:8000"

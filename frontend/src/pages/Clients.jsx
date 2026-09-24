@@ -58,6 +58,7 @@ export default function Clients() {
   }
 
   const emailsOf = (c) => [c.email, c.partner?.email].filter(Boolean).join(', ')
+  const addressOf = (c) => [c.address, c.address2].filter(Boolean).join(', ')
   const phonesOf = (c) => [c.phone, c.partner?.phone].filter(Boolean).map(formatPhone).join(', ')
 
   const filtered = clients.filter(c => {
@@ -160,6 +161,7 @@ export default function Clients() {
                 <th className="px-3 py-2 border-b font-medium">Nom(s)</th>
                 <th className="px-3 py-2 border-b font-medium">Email(s)</th>
                 <th className="px-3 py-2 border-b font-medium">Téléphone(s)</th>
+                <th className="px-3 py-2 border-b font-medium">Adresse</th>
                 <th className="px-3 py-2 border-b font-medium">Type</th>
                 <th className="px-3 py-2 border-b font-medium">Programme / Lot</th>
                 <th className="px-3 py-2 border-b font-medium">Actions</th>
@@ -171,6 +173,7 @@ export default function Clients() {
                   <td className="px-3 py-2 font-medium whitespace-nowrap">{nomsOf(c) || '—'}</td>
                   <td className="px-3 py-2 max-w-[200px] truncate" title={emailsOf(c)}>{emailsOf(c) || '—'}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{phonesOf(c) || '—'}</td>
+                  <td className="px-3 py-2 max-w-[260px] truncate" title={addressOf(c)}>{addressOf(c) || '—'}</td>
                   <td className="px-3 py-2">
                     <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${c.type === 'acquereur' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
                       {c.type === 'acquereur' ? 'Acquéreur' : 'Prospect'}

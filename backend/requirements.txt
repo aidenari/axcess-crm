@@ -12,3 +12,4 @@ email-validator==2.1.0  # validation des emails via Pydantic
 pytest==7.4.3           # pour tester ton API plus tard
 httpx==0.24.1           # client HTTP pour les tests
 openpyxl==3.1.5         # export xlsx
+reportlab==5.0.1        # export PDF des grilles de prix

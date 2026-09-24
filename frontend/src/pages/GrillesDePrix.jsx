@@ -7,6 +7,7 @@ import StatsBar from '../components/StatsBar.jsx'
 import BatimentCard from '../components/BatimentCard.jsx'
 import CreateBatimentModal from '../components/CreateBatimentModal.jsx'
 import { isReadOnly } from '../utils/auth'
+import { matchesLotFilters, isLotFilterActive, lotTotals } from '../utils/lotTotals'
 
 export default function GrillesDePrix() {
   const { programme_id } = useParams()
@@ -21,6 +22,7 @@ export default function GrillesDePrix() {
   const [programme, setProgramme] = useState(null)
   const [stats, setStats] = useState(null)
   const [batiments, setBatiments] = useState([])
+  const [programmeLots, setProgrammeLots] = useState([])
   const [filters, setFilters] = useState({ statut: 'Tous', type: 'Tous', batiment: 'Tous' })
   const [openBatModal, setOpenBatModal] = useState(false)
   const [highlightLotId, setHighlightLotId] = useState(null)
@@ -78,6 +80,16 @@ export default function GrillesDePrix() {
       setStats(data)
     } catch (e) { console.error(e) }
   }
+  // Lots de tout le programme, pour la ligne "Total programme".
+  const loadProgrammeLots = async () => {
+    try {
+      if (!selectedProgramme) { setProgrammeLots([]); return }
+      const { data } = await api.get('/lots', { params: { programme_id: selectedProgramme } })
+      setProgrammeLots(data || [])
+    } catch (e) { console.error(e) }
+  }
+  const onLotsChanged = () => { loadStats(); loadProgrammeLots() }
+
   const loadBatiments = async () => {
     try {
       if (!selectedProgramme) { setBatiments([]); return }
@@ -90,7 +102,7 @@ export default function GrillesDePrix() {
   useEffect(() => { if (programme_id) setSelectedProgramme(String(programme_id)) }, [programme_id])
   useEffect(() => {
     if (!selectedProgramme) return
-    loadProgramme(); loadStats(); loadBatiments()
+    loadProgramme(); loadStats(); loadBatiments(); loadProgrammeLots()
   }, [selectedProgramme])
 
   useEffect(() => {
@@ -150,7 +162,7 @@ export default function GrillesDePrix() {
     try {
       const { data } = await api.post(`/lots/import?programme_id=${selectedProgramme}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       setImportReport(data)
-      loadStats(); loadBatiments()
+      loadStats(); loadBatiments(); loadProgrammeLots()
     } catch (e) { console.error(e) }
     // reset file input so the same file can be re-imported
     if (fileRef.current) fileRef.current.value = ''
@@ -164,6 +176,15 @@ export default function GrillesDePrix() {
       return nA.localeCompare(nB)
     })
   }, [batiments])
+
+  // Total programme : mêmes filtres que les grilles (+ filtre Bâtiment),
+  // même calcul que la ligne de totaux de chaque bâtiment.
+  const programmeFiltered = useMemo(() => programmeLots.filter(l =>
+    matchesLotFilters(l, filters) && (filters.batiment === 'Tous' || l.batiment_name === filters.batiment)
+  ), [programmeLots, filters])
+  const programmeTotals = useMemo(() => lotTotals(programmeFiltered), [programmeFiltered])
+  const programmeFilterActive = isLotFilterActive(filters) || filters.batiment !== 'Tous'
+  const eur = (v) => v == null ? '-' : v.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
 
   const options = useMemo(() => {
     const batNames = sortedBatiments.map(b => b.nom || b.name).filter(Boolean)
@@ -214,16 +235,25 @@ export default function GrillesDePrix() {
               Avant d'importer, assurez-vous que votre fichier CSV respecte exactement ce format :
             </p>
             <div className="bg-gray-50 rounded p-3 text-xs font-mono mb-3 overflow-x-auto">
-              batiment_nom | lot | niveau | type | surface_sol | sha_m2 | orientation | garage | parking1 | parking2 | cave | jardin | terrasse | prix_logement | prix_stationnement | prix_total | prix_m2_appartement | prix_m2_appart_parking | acquereur | statut
+              batiment_nom | lot | niveau | type | surface_sol | sha_m2 | orientation | garage | parking1 | parking2 | cave | jardin | terrasse | prix_logement | prix_stationnement | prix_total | prix_m2_appartement | prix_m2_appart_parking | acquereur | statut | date_option | date_reservation | date_acte
             </div>
             <ul className="text-sm text-gray-700 space-y-1 mb-4 list-disc list-inside">
               <li>La première ligne doit être l'en-tête (noms des colonnes)</li>
               <li><strong>batiment_nom</strong> : nom exact du bâtiment (ex: Bâtiment A) — sera créé s'il n'existe pas</li>
               <li><strong>garage, parking1, parking2, cave</strong> : <code>Oui</code> ou <code>Non</code></li>
-              <li><strong>statut</strong> : Libre, Réservé, Option ou Acté</li>
+              <li><strong>statut</strong> : Libre, Réservé, Option ou Acté (vide à la création : Libre)</li>
               <li><strong>Prix</strong> : nombre entier ou décimal (ex: 250000 ou 250000.00)</li>
               <li><strong>acquereur</strong> : laisser vide si aucun</li>
+              <li><strong>date_option, date_reservation, date_acte</strong> : AAAA-MM-JJ ou JJ/MM/AAAA</li>
             </ul>
+            <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-gray-700 mb-4">
+              <p className="font-medium mb-1">Mise à jour d'un lot existant</p>
+              <ul className="space-y-1 list-disc list-inside">
+                <li>Une cellule <strong>vide</strong> (ou une colonne absente) <strong>ne modifie rien</strong> : la valeur déjà enregistrée est conservée.</li>
+                <li>Pour <strong>effacer</strong> une valeur, écrivez <code>#EFFACER</code> dans la cellule (niveau, type, orientation, acquereur, surfaces, prix, dates).</li>
+                <li><code>#EFFACER</code> est refusé sur <strong>lot</strong> et <strong>statut</strong> (obligatoires). Pour décocher une case (garage, parking, cave), écrivez <code>Non</code>.</li>
+              </ul>
+            </div>
             <p className="text-xs text-blue-700 mb-4">💡 Conseil : téléchargez d'abord le « Modèle CSV » pour obtenir un fichier au bon format.</p>
             <div className="flex justify-end gap-2">
               <button className="px-4 py-2 rounded border text-gray-600 hover:bg-gray-50" onClick={() => setShowImportWarning(false)}>Annuler</button>
@@ -302,7 +332,7 @@ export default function GrillesDePrix() {
               key={b.id}
               batiment={b}
               filters={filters}
-              onLotsChanged={loadStats}
+              onLotsChanged={onLotsChanged}
               onAddBatimentClick={() => setOpenBatModal(true)}
               highlightLotId={highlightLotId}
               onBatimentUpdated={(updated) => {
@@ -310,6 +340,7 @@ export default function GrillesDePrix() {
               }}
               onBatimentDeleted={(id) => {
                 setBatiments(prev => prev.filter(x => x.id !== id))
+                onLotsChanged()
               }}
             />
           ))}
@@ -317,6 +348,25 @@ export default function GrillesDePrix() {
           <div className="text-gray-500 text-sm">Aucun bâtiment pour ce programme.</div>
         )}
       </div>
+
+      {programmeLots.length > 0 && (
+        <div className="bg-white rounded-xl border mt-2 mb-6">
+          <div className="p-3 bg-gray-100 border-b rounded-t-xl font-semibold">
+            {programmeFilterActive
+              ? `Total programme — lots affichés (${programmeTotals.count} sur ${programmeLots.length})`
+              : `Total programme (${programmeTotals.count} lot${programmeTotals.count > 1 ? 's' : ''})`}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 p-4 text-sm">
+            <div><div className="text-gray-500">Nb de lots</div><div className="font-semibold">{programmeTotals.count}</div></div>
+            <div><div className="text-gray-500">SHA m²</div><div className="font-semibold">{programmeTotals.sha.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m²</div></div>
+            <div><div className="text-gray-500">Prix logement</div><div className="font-semibold">{eur(programmeTotals.prixLogement)}</div></div>
+            <div><div className="text-gray-500">Prix stationnement</div><div className="font-semibold">{eur(programmeTotals.prixStationnement)}</div></div>
+            <div><div className="text-gray-500">Prix total</div><div className="font-semibold text-blue-900">{eur(programmeTotals.prixTotal)}</div></div>
+            <div><div className="text-gray-500">Prix/m² appart</div><div className="font-semibold">{eur(programmeTotals.m2Appart)}</div></div>
+            <div><div className="text-gray-500">Prix/m² stationnement inclus</div><div className="font-semibold">{eur(programmeTotals.m2StationnementInclus)}</div></div>
+          </div>
+        </div>
+      )}
 
       <CreateBatimentModal open={openBatModal} onClose={() => setOpenBatModal(false)} programmeId={selectedProgramme} onCreated={onCreatedBatiment} />
     </div>

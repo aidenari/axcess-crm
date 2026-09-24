@@ -5,6 +5,7 @@ import CreateLotModal from './CreateLotModal.jsx'
 import EditLotModal from './EditLotModal.jsx'
 import EditBatimentModal from './EditBatimentModal.jsx'
 import { isReadOnly } from '../utils/auth'
+import { matchesLotFilters, isLotFilterActive, lotTotals } from '../utils/lotTotals'
 import { Pencil, Trash2 } from 'lucide-react'
 
 export default function GrilleTable({ batiment, filters, onChanged, highlightLotId, onBatimentUpdated, onBatimentDeleted }) {
@@ -53,11 +54,7 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
 
   const filtered = useMemo(() => {
     return lots
-      .filter(l => {
-        const okS = filters?.statut === 'Tous' || l.statut === filters.statut
-        const okT = filters?.type === 'Tous' || l.type === filters.type
-        return okS && okT
-      })
+      .filter(l => matchesLotFilters(l, filters))
       .sort((a, b) => {
         const dn = niveauOrder(a.niveau) - niveauOrder(b.niveau)
         if (dn !== 0) return dn
@@ -65,12 +62,11 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
       })
   }, [lots, filters])
 
-  const caTotal = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.prix_total) || 0), 0), [filtered])
-  const totalSha = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.sha_m2) || 0), 0), [filtered])
-  const totalPrixLogement = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.prix_logement) || 0), 0), [filtered])
-  const totalPrixStationnement = useMemo(() => filtered.reduce((acc, l) => acc + (Number(l.prix_stationnement) || 0), 0), [filtered])
-  const avgPrixM2Appart = totalSha > 0 ? totalPrixLogement / totalSha : null
-  const avgPrixM2Parking = totalSha > 0 ? caTotal / totalSha : null
+  const totals = useMemo(() => lotTotals(filtered), [filtered])
+  const { sha: totalSha, prixLogement: totalPrixLogement, prixStationnement: totalPrixStationnement, prixTotal: caTotal } = totals
+  const avgPrixM2Appart = totals.m2Appart
+  const avgPrixM2Parking = totals.m2StationnementInclus
+  const filterActive = isLotFilterActive(filters)
 
   const handleDeleteBatiment = async () => {
     if (!window.confirm("Êtes-vous sûr de vouloir supprimer ce bâtiment et tous ses lots ?")) return
@@ -122,9 +118,10 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
               <th className="p-2 border">Prix stationnement</th>
               <th className="p-2 border">Prix total</th>
               <th className="p-2 border">Prix/m² appart</th>
-              <th className="p-2 border">Prix/m² + parking</th>
+              <th className="p-2 border">Prix/m² stationnement inclus</th>
               <th className="p-2 border">Acquéreur(s)</th>
               <th className="p-2 border">Statut</th>
+              <th className="p-2 border">Option</th>
               <th className="p-2 border">Réservation</th>
               <th className="p-2 border">Acte</th>
               <th className="p-2 border">Actions</th>
@@ -136,14 +133,18 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
             ))}
             {!filtered.length && (
               <tr>
-                <td className="p-4 text-center text-gray-500" colSpan={19}>Aucun lot</td>
+                <td className="p-4 text-center text-gray-500" colSpan={20}>Aucun lot</td>
               </tr>
             )}
           </tbody>
           {filtered.length > 0 && (
             <tfoot>
               <tr className="bg-gray-50 font-semibold">
-                <td className="p-2 border" colSpan={4}>Total bâtiment ({filtered.length} lot{filtered.length > 1 ? 's' : ''})</td>
+                <td className="p-2 border" colSpan={4}>
+                  {filterActive
+                    ? `Total des lots affichés (${filtered.length} sur ${lots.length})`
+                    : `Total bâtiment (${filtered.length} lot${filtered.length > 1 ? 's' : ''})`}
+                </td>
                 <td className="p-2 border">{totalSha.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m²</td>
                 <td className="p-2 border" colSpan={4}></td>
                 <td className="p-2 border">{totalPrixLogement.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</td>
@@ -151,7 +152,7 @@ export default function GrilleTable({ batiment, filters, onChanged, highlightLot
                 <td className="p-2 border">{caTotal.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}</td>
                 <td className="p-2 border">{avgPrixM2Appart != null ? avgPrixM2Appart.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }) : '-'}</td>
                 <td className="p-2 border">{avgPrixM2Parking != null ? avgPrixM2Parking.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }) : '-'}</td>
-                <td className="p-2 border" colSpan={5}></td>
+                <td className="p-2 border" colSpan={6}></td>
               </tr>
             </tfoot>
           )}

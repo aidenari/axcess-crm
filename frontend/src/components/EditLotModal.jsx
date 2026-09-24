@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Modal from './Modal.jsx'
 import ClientDrawer from './ClientDrawer.jsx'
+import DateField from './DateField.jsx'
 import api, { apiErrorMessage } from '../api/axios'
 import { Plus, Trash2 } from 'lucide-react'
 
@@ -32,6 +33,7 @@ const toForm = (lot) => ({
   prix_m2_appart_parking: lot?.prix_m2_appart_parking ?? '',
   acquereur: lot?.acquereur ?? '',
   statut: lot?.statut ?? 'Libre',
+  date_option: toIsoDate(lot?.date_option),
   date_reservation: toIsoDate(lot?.date_reservation),
   date_acte: toIsoDate(lot?.date_acte),
   client_ids: lot?.acquereurs?.length
@@ -166,6 +168,7 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
         prix_total: form.prix_total !== '' ? Number(form.prix_total) : null,
         prix_m2_appartement: form.prix_m2_appartement !== '' ? Number(form.prix_m2_appartement) : null,
         prix_m2_appart_parking: form.prix_m2_appart_parking !== '' ? Number(form.prix_m2_appart_parking) : null,
+        date_option: form.date_option || null,
         date_reservation: form.date_reservation || null,
         date_acte: form.date_acte || null,
       }
@@ -412,14 +415,9 @@ export default function EditLotModal({ open, onClose, lot, onSaved, onDeleted })
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm mb-1">Date de réservation</label>
-            <input className="input" type="date" name="date_reservation" value={form.date_reservation} onChange={onChange} />
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Date de signature d'acte</label>
-            <input className="input" type="date" name="date_acte" value={form.date_acte} onChange={onChange} />
-          </div>
+          <DateField label="Date de mise en option" name="date_option" value={form.date_option} onChange={onChange} />
+          <DateField label="Date de réservation" name="date_reservation" value={form.date_reservation} onChange={onChange} />
+          <DateField label="Date de signature d'acte" name="date_acte" value={form.date_acte} onChange={onChange} />
 
           <div className="col-span-2 flex justify-between items-center mt-4 pt-3 border-t">
             <button

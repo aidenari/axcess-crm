@@ -12,6 +12,29 @@ def validate_lot_statut(value: str | None) -> str | None:
     return value
 
 
+LOT_DATE_FIELDS = ("date_option", "date_reservation", "date_acte")
+LOT_DATE_MIN_YEAR = 1900
+
+
+def validate_lot_date(value: str | None) -> str | None:
+    """AAAA-MM-JJ, date réelle, année >= 1900. Vide ou null = pas de date."""
+    import re
+    from datetime import date
+
+    if value is None or value.strip() == "":
+        return None
+    error = f"date invalide {value!r} (attendu : AAAA-MM-JJ, à partir de {LOT_DATE_MIN_YEAR})"
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError(error)
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(error)
+    if parsed.year < LOT_DATE_MIN_YEAR:
+        raise ValueError(error)
+    return value
+
+
 class UserRegister(BaseModel):
     email: EmailStr
     full_name: str | None = None
@@ -165,10 +188,12 @@ class LotCreate(BaseModel):
     prix_m2_appart_parking: float | None = None
     acquereur: str | None = None
     statut: str | None = None
+    date_option: str | None = None
     date_reservation: str | None = None
     date_acte: str | None = None
 
     _check_statut = field_validator("statut")(validate_lot_statut)
+    _check_dates = field_validator(*LOT_DATE_FIELDS)(validate_lot_date)
 
 
 class LotUpdate(BaseModel):
@@ -192,6 +217,7 @@ class LotUpdate(BaseModel):
     prix_m2_appart_parking: float | None = None
     acquereur: str | None = None
     statut: str | None = None
+    date_option: str | None = None
     date_reservation: str | None = None
     date_acte: str | None = None
 
@@ -202,6 +228,9 @@ class LotUpdate(BaseModel):
         if value is None:
             raise ValueError("statut ne peut pas être vide")
         return validate_lot_statut(value)
+
+    # Un null explicite est voulu ici : c'est ainsi qu'une date est effacée.
+    _check_dates = field_validator(*LOT_DATE_FIELDS)(validate_lot_date)
 
 
 # --- Annexes ---
@@ -242,9 +271,11 @@ class LotRead(BaseModel):
     prix_m2_appart_parking: float | None = None
     acquereur: str | None = None
     statut: str
+    date_option: str | None = None
     date_reservation: str | None = None
     date_acte: str | None = None
     programme_name: str | None = None
+    batiment_name: str | None = None
     client_name: str | None = None
     annexes: list[AnnexeRead] = []
     model_config = ConfigDict(from_attributes=True)

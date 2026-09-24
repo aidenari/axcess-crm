@@ -34,6 +34,7 @@ from backend.schemas import (
     LotRead,
     LotsStatistics,
     LOT_STATUTS,
+    LOT_DATE_MIN_YEAR,
     AnnexeCreate,
     AnnexeRead,
 )
@@ -432,6 +433,7 @@ def _build_xlsx_response(
     sheet_title: str,
     filename: str,
     money_columns: set[int] = frozenset(),
+    bold_last_row: bool = False,
 ) -> StreamingResponse:
     """Genere un .xlsx en memoire (lecture seule, aucune ecriture en base) et
     le renvoie en telechargement. Partage par tous les exports xlsx :
@@ -453,6 +455,10 @@ def _build_xlsx_response(
     for row in rows:
         ws.append(row)
 
+    if bold_last_row and ws.max_row > 1:
+        for cell in ws[ws.max_row]:
+            cell.font = Font(bold=True)
+
     for col_idx in money_columns:
         for row_idx in range(2, ws.max_row + 1):
             ws.cell(row=row_idx, column=col_idx).number_format = "#,##0 €"
@@ -461,7 +467,8 @@ def _build_xlsx_response(
         width = len(header)
         for row_idx in range(2, ws.max_row + 1):
             v = ws.cell(row=row_idx, column=col_idx).value
-            if v is not None:
+            # Une formule (=SUM(...)) ne compte pas pour la largeur affichee.
+            if v is not None and not (isinstance(v, str) and v.startswith("=")):
                 width = max(width, len(str(v)))
         ws.column_dimensions[get_column_letter(col_idx)].width = width + 2
 
@@ -481,6 +488,8 @@ def export_programme_xlsx(programme_id: int, db: Session = Depends(get_db)):
     """Export lecture seule d'un programme au format xlsx (aucune ecriture en base)."""
     from datetime import date
 
+    from openpyxl.utils import get_column_letter
+
     prog = db.get(Programme, programme_id)
     if not prog:
         raise HTTPException(status_code=404, detail="Programme not found")
@@ -494,13 +503,15 @@ def export_programme_xlsx(programme_id: int, db: Session = Depends(get_db)):
     )
     rows.sort(key=lambda r: (r[1] or "", _natural_sort_key(r[0].lot)))
 
+    # Memes colonnes que la grille a l'ecran (+ Batiment, + dates).
     headers = [
         "Bâtiment", "N° lot", "Niveau", "Type", "Surface sol", "SHA m²",
+        "Orientation", "Annexes", "Jardin", "Terrasse",
         "Prix logement", "Prix stationnement", "Prix total",
-        "Prix/m² appart", "Prix/m² + parking", "Statut",
-        "Date réservation", "Date acte", "Acquéreur",
+        "Prix/m² appart", "Prix/m² stationnement inclus", "Statut",
+        "Date option", "Date réservation", "Date acte", "Acquéreur",
     ]
-    price_columns = {7, 8, 9, 10, 11}  # colonnes Prix logement .. Prix/m² + parking (1-indexees)
+    price_columns = {11, 12, 13, 14, 15}  # Prix logement .. Prix/m² stationnement inclus (1-indexees)
 
     data_rows = []
     for lot, batiment_nom, client in rows:
@@ -513,19 +524,244 @@ def export_programme_xlsx(programme_id: int, db: Session = Depends(get_db)):
             lot.type,
             lot.surface_sol,
             lot.sha_m2,
+            lot.orientation,
+            ", ".join(f"{a.type} {a.numero or ''}".strip() for a in lot.annexes),
+            lot.jardin,
+            lot.terrasse,
             lot.prix_logement,
             lot.prix_stationnement,
             lot.prix_total,
             lot.prix_m2_appartement,
             lot.prix_m2_appart_parking,
             lot.statut,
+            lot.date_option,
             lot.date_reservation,
             lot.date_acte,
             acquereur,
         ])
 
+    # Ligne de totaux en formules Excel (le client retouche ses fichiers).
+    # Prix/m^2 = moyennes PONDEREES (somme des prix / somme des SHA), comme a
+    # l'ecran : total / SHA totale de cette ligne redonne la moyenne.
+    if data_rows:
+        first, last = 2, len(data_rows) + 1
+        col = lambda name: get_column_letter(headers.index(name) + 1)
+        rng = lambda name: f"{col(name)}{first}:{col(name)}{last}"
+        sha = f"SUM({rng('SHA m²')})"
+        total = [""] * len(headers)
+        total[0] = "Total programme"
+        total[headers.index("N° lot")] = f"=COUNTA({rng('N° lot')})"
+        for name in ("SHA m²", "Prix logement", "Prix stationnement", "Prix total"):
+            total[headers.index(name)] = f"=SUM({rng(name)})"
+        total[headers.index("Prix/m² appart")] = f"=IF({sha}>0,SUM({rng('Prix logement')})/{sha},\"\")"
+        total[headers.index("Prix/m² stationnement inclus")] = f"=IF({sha}>0,SUM({rng('Prix total')})/{sha},\"\")"
+        data_rows.append(total)
+
     filename = f"export_{_slugify(prog.nom)}_{date.today().isoformat()}.xlsx"
-    return _build_xlsx_response(headers, data_rows, prog.nom or "Programme", filename, price_columns)
+    return _build_xlsx_response(
+        headers, data_rows, prog.nom or "Programme", filename, price_columns, bold_last_row=bool(data_rows)
+    )
+
+
+def _niveau_order(niveau: str | None) -> int:
+    """Meme ordre que la grille a l'ecran : RDC, R+1, R+2..., puis le reste."""
+    n = (niveau or "").strip().upper()
+    if n == "RDC":
+        return 0
+    m = re.fullmatch(r"R\+(\d+)", n)
+    return int(m.group(1)) if m else 999
+
+
+def _lot_totals(lots: list[Lot]) -> dict:
+    """Totaux d'une grille. Prix/m^2 = moyennes PONDEREES (somme des prix /
+    somme des SHA), comme la grille a l'ecran et les formules de l'export Excel."""
+    s = lambda f: sum(float(getattr(l, f) or 0) for l in lots)
+    sha = s("sha_m2")
+    return {
+        "count": len(lots),
+        "sha": sha,
+        "prix_logement": s("prix_logement"),
+        "prix_stationnement": s("prix_stationnement"),
+        "prix_total": s("prix_total"),
+        "m2_appart": s("prix_logement") / sha if sha > 0 else None,
+        "m2_stat": s("prix_total") / sha if sha > 0 else None,
+    }
+
+
+@app.get("/programmes/{programme_id}/export-pdf")
+def export_programme_pdf(programme_id: int, db: Session = Depends(get_db)):
+    """Grille de prix complete d'un programme en PDF A4 paysage (lecture seule) :
+    une section par batiment, sous-total par batiment s'il y en a plusieurs,
+    ligne "Total programme" a la fin. Toujours la grille complete, sans filtre."""
+    from datetime import date
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as rl_canvas
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    prog = db.get(Programme, programme_id)
+    if not prog:
+        raise HTTPException(status_code=404, detail="Programme not found")
+
+    rows = (
+        db.query(Lot, Batiment.nom, Client)
+        .join(Batiment, Batiment.id == Lot.batiment_id)
+        .outerjoin(Client, Client.id == Lot.client_id)
+        .filter(Batiment.programme_id == programme_id)
+        .all()
+    )
+    rows.sort(key=lambda r: (_natural_sort_key(r[1]), _niveau_order(r[0].niveau), _natural_sort_key(r[0].lot)))
+    by_bat: dict[str, list] = {}
+    for lot, bat_nom, client in rows:
+        by_bat.setdefault(bat_nom or "", []).append((lot, client))
+
+    # --- mise en forme ---
+    FONT = 7
+    st_txt = ParagraphStyle("txt", fontName="Helvetica", fontSize=FONT, leading=FONT + 1.5)
+    st_num = ParagraphStyle("num", parent=st_txt, alignment=2)  # a droite
+    st_head = ParagraphStyle("head", parent=st_txt, fontName="Helvetica-Bold", fontSize=FONT - 1, leading=FONT)
+    st_tot = ParagraphStyle("tot", parent=st_txt, fontName="Helvetica-Bold")
+    st_tot_num = ParagraphStyle("totnum", parent=st_tot, alignment=2)
+
+    def fr_num(v, decimals=0):
+        if v in (None, ""):
+            return "-"
+        txt = f"{float(v):,.{decimals}f}".replace(",", " ").replace(".", ",")
+        return txt
+
+    def eur(v):
+        return "-" if v in (None, "") else f"{fr_num(v)} €"
+
+    def surf(v):
+        # 2 decimales fixes : les virgules s'alignent en colonne a l'impression.
+        return "-" if v in (None, "", 0) else fr_num(v, 2)
+
+    def fr_date(v):
+        m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", v or "")
+        return f"{m.group(3)}/{m.group(2)}/{m.group(1)}" if m else "-"
+
+    P = lambda text, style=st_txt: Paragraph(escape(str(text)), style)
+
+    # (en-tete, largeur mm, numerique) : 277 mm = largeur utile A4 paysage.
+    # En-tetes avec <br/> : ReportLab ne coupe que sur les espaces.
+    columns = [
+        ("Lot", 8, False), ("Niveau", 9, False), ("Type", 8, False),
+        ("Surf.<br/>sol", 11, True), ("SHA m²", 13, True), ("Orient.", 9, False),
+        ("Annexes", 28, False), ("Jardin", 10, True), ("Terrasse", 11, True),
+        ("Prix<br/>logement", 18, True), ("Prix<br/>stationnement", 17.5, True), ("Prix total", 18, True),
+        ("Prix/m²<br/>appart", 14, True), ("Prix/m²<br/>stationnement<br/>inclus", 17.5, True),
+        ("Acquéreur(s)", 32, False), ("Statut", 11, False),
+        ("Option", 14, False), ("Réservation", 14, False), ("Acte", 14, False),
+    ]
+    col_widths = [w * mm for _, w, _ in columns]
+    header = [Paragraph(h, st_head) for h, _, _ in columns]
+    STATUT_BG = {"Option": colors.HexColor("#dcfce7"), "Réservé": colors.HexColor("#fee2e2"), "Acté": colors.HexColor("#dbeafe")}
+
+    def lot_row(lot, client):
+        name = f"{client.last_name} {client.first_name}".strip() if client else (lot.acquereur or "")
+        annexes = ", ".join(f"{a.type} {a.numero or ''}".strip() for a in lot.annexes) or "-"
+        values = [
+            lot.lot or "", lot.niveau or "", lot.type or "", surf(lot.surface_sol), surf(lot.sha_m2),
+            lot.orientation or "", annexes, surf(lot.jardin), surf(lot.terrasse),
+            eur(lot.prix_logement), eur(lot.prix_stationnement), eur(lot.prix_total),
+            eur(lot.prix_m2_appartement), eur(lot.prix_m2_appart_parking),
+            name or "-", lot.statut or "", fr_date(lot.date_option), fr_date(lot.date_reservation), fr_date(lot.date_acte),
+        ]
+        return [P(v, st_num if columns[i][2] else st_txt) for i, v in enumerate(values)]
+
+    def total_row(label, t):
+        row = [""] * len(columns)
+        row[0] = P(label, st_tot)
+        row[4] = P(surf(t["sha"]), st_tot_num)
+        row[9] = P(eur(t["prix_logement"]), st_tot_num)
+        row[10] = P(eur(t["prix_stationnement"]), st_tot_num)
+        row[11] = P(eur(t["prix_total"]), st_tot_num)
+        row[12] = P(eur(t["m2_appart"]), st_tot_num)
+        row[13] = P(eur(t["m2_stat"]), st_tot_num)
+        return row
+
+    all_lots = [lot for lot, _, _ in rows]
+    multi = len(by_bat) > 1
+    story = []
+    title_style = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=13, leading=16)
+    sub_style = ParagraphStyle("sub", fontName="Helvetica", fontSize=8, leading=10, textColor=colors.HexColor("#4b5563"))
+    story.append(Paragraph(escape(f"Grille de prix — {prog.nom}"), title_style))
+    infos = " · ".join(x for x in (prog.ville, f"{len(all_lots)} lots", f"édité le {date.today().strftime('%d/%m/%Y')}") if x)
+    story.append(Paragraph(escape(infos), sub_style))
+    story.append(Spacer(1, 3 * mm))
+
+    bat_names = list(by_bat)
+    for i, bat_nom in enumerate(bat_names):
+        items = by_bat[bat_nom]
+        data = [header] + [lot_row(lot, client) for lot, client in items]
+        style = [
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#9ca3af")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e5e7eb")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            # Colonnes texte qui suivent une colonne de nombres alignes a droite :
+            # plus d'air pour ne pas lire "69,16 NE" ou "4 222 € KOCH" d'un bloc.
+            ("LEFTPADDING", (5, 0), (5, -1), 4), ("LEFTPADDING", (14, 0), (14, -1), 4),
+        ]
+        for r, (lot, _) in enumerate(items, start=1):
+            bg = STATUT_BG.get(lot.statut)
+            if bg:
+                style.append(("BACKGROUND", (0, r), (-1, r), bg))
+        if multi:
+            data.append(total_row(f"Total {bat_nom} ({len(items)} lot{'s' if len(items) > 1 else ''})", _lot_totals([l for l, _ in items])))
+            style += [("SPAN", (0, len(data) - 1), (3, len(data) - 1)), ("BACKGROUND", (0, len(data) - 1), (-1, len(data) - 1), colors.HexColor("#f3f4f6"))]
+        if i == len(bat_names) - 1:
+            data.append(total_row(f"Total programme ({len(all_lots)} lot{'s' if len(all_lots) > 1 else ''})", _lot_totals(all_lots)))
+            style += [
+                ("SPAN", (0, len(data) - 1), (3, len(data) - 1)),
+                ("BACKGROUND", (0, len(data) - 1), (-1, len(data) - 1), colors.HexColor("#d1d5db")),
+                ("LINEABOVE", (0, len(data) - 1), (-1, len(data) - 1), 1, colors.black),
+            ]
+        story.append(Paragraph(escape(f"{bat_nom} — {len(items)} lot{'s' if len(items) > 1 else ''}"),
+                               ParagraphStyle("bat", fontName="Helvetica-Bold", fontSize=9, leading=12, spaceBefore=2 * mm, spaceAfter=1 * mm)))
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle(style))
+        story.append(table)
+
+    if not rows:
+        story.append(Paragraph("Aucun lot pour ce programme.", sub_style))
+
+    # "page X / Y" : le total de pages n'est connu qu'a la fin.
+    class NumberedCanvas(rl_canvas.Canvas):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._pages = []
+
+        def showPage(self):
+            self._pages.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._pages)
+            for state in self._pages:
+                self.__dict__.update(state)
+                self.setFont("Helvetica", 7)
+                self.setFillColor(colors.HexColor("#6b7280"))
+                self.drawString(10 * mm, 6 * mm, f"{prog.nom} — Grille de prix")
+                self.drawRightString(landscape(A4)[0] - 10 * mm, 6 * mm, f"page {self._pageNumber} / {total}")
+                super().showPage()
+            super().save()
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm, topMargin=10 * mm, bottomMargin=12 * mm,
+        title=f"Grille de prix — {prog.nom}",
+    )
+    doc.build(story, canvasmaker=NumberedCanvas)
+    buf.seek(0)
+    filename = f"grille_{_slugify(prog.nom)}_{date.today().isoformat()}.pdf"
+    return StreamingResponse(buf, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 # ----------------- BÃ¢timents -----------------
@@ -586,6 +822,7 @@ def _enrich_lot(lot: Lot, db: Session) -> dict:
     bat = db.get(Batiment, lot.batiment_id)
     prog = db.get(Programme, bat.programme_id) if bat else None
     item["programme_name"] = prog.nom if prog else None
+    item["batiment_name"] = bat.nom if bat else None
 
     client = db.get(Client, lot.client_id) if lot.client_id else None
     if client:
@@ -604,7 +841,7 @@ def list_lots(
     db: Session = Depends(get_db),
 ):
     q = (
-        db.query(Lot, Programme.nom, Client)
+        db.query(Lot, Programme.nom, Batiment.nom, Client)
         .join(Batiment, Batiment.id == Lot.batiment_id)
         .join(Programme, Programme.id == Batiment.programme_id)
         .outerjoin(Client, Client.id == Lot.client_id)
@@ -618,10 +855,11 @@ def list_lots(
     rows = q.order_by(Lot.id.desc()).all()
     
     results = []
-    for lot, p_nom, client in rows:
+    for lot, p_nom, b_nom, client in rows:
         # Convert ORM object to dict safe for Pydantic
         item = {k: v for k, v in lot.__dict__.items() if not k.startswith("_")}
         item["programme_name"] = p_nom
+        item["batiment_name"] = b_nom
         
         # Resolve client name
         if client:
@@ -791,6 +1029,7 @@ def download_csv_template():
         "orientation", "garage", "parking1", "parking2", "cave", "jardin",
         "terrasse", "prix_logement", "prix_stationnement", "prix_total",
         "prix_m2_appartement", "prix_m2_appart_parking", "acquereur", "statut",
+        "date_option", "date_reservation", "date_acte",
     ]
     buf = StringIO()
     writer = csv.DictWriter(buf, fieldnames=headers)
@@ -819,6 +1058,34 @@ _CSV_STATUT_ALIASES = {
     "acté": "Acté",
     "acte": "Acté",
 }
+
+
+_CSV_DATE_FIELDS = ("date_option", "date_reservation", "date_acte")
+
+# Import CSV : une cellule vide ne modifie jamais la valeur existante. Pour
+# effacer volontairement un champ facultatif, le client ecrit ce marqueur.
+_CSV_CLEAR = "#EFFACER"
+
+
+def _is_csv_clear(value: str | None) -> bool:
+    return (value or "").strip().upper() == _CSV_CLEAR
+
+
+def _parse_csv_date(raw: str) -> str:
+    """Date du tableur -> YYYY-MM-DD (format stocke). Accepte YYYY-MM-DD et
+    JJ/MM/AAAA (format d'un export Excel francais), annee >= 1900 comme
+    l'API. ValueError sinon."""
+    from datetime import datetime
+
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            parsed = datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+        if parsed.year < LOT_DATE_MIN_YEAR:
+            raise ValueError(raw)
+        return parsed.isoformat()
+    raise ValueError(raw)
 
 
 async def _import_lots_impl(programme_id: int, db: Session, file: bytes | None):
@@ -854,13 +1121,38 @@ async def _import_lots_impl(programme_id: int, db: Session, file: bytes | None):
         if not lot_num:
             errors.append({"ligne": line_num, "raison": "numéro de lot manquant"})
             continue
+        if _is_csv_clear(lot_num):
+            errors.append({"ligne": line_num, "raison": f"{_CSV_CLEAR} interdit sur 'lot' (champ obligatoire)"})
+            continue
+
         raw_statut = (row.get("statut") or "").strip()
         statut = None
+        if _is_csv_clear(raw_statut):
+            errors.append({"ligne": line_num, "raison": f"{_CSV_CLEAR} interdit sur 'statut' (champ obligatoire)"})
+            continue
         if raw_statut:
             statut = _CSV_STATUT_ALIASES.get(unicodedata.normalize("NFC", raw_statut).lower())
             if statut is None:
                 errors.append({"ligne": line_num, "raison": f"statut inconnu {raw_statut!r} (attendu : {', '.join(LOT_STATUTS)})"})
                 continue
+
+        # Dates : une cellule vide ne touche pas la date existante (un
+        # re-import de grille sans dates ne doit rien effacer).
+        dates = {}
+        bad_date = None
+        for k in _CSV_DATE_FIELDS:
+            raw_date = (row.get(k) or "").strip()
+            if _is_csv_clear(raw_date):
+                dates[k] = None
+            elif raw_date:
+                try:
+                    dates[k] = _parse_csv_date(raw_date)
+                except ValueError:
+                    bad_date = f"date invalide pour '{k}': {raw_date!r} (attendu : AAAA-MM-JJ ou JJ/MM/AAAA, à partir de {LOT_DATE_MIN_YEAR})"
+                    break
+        if bad_date:
+            errors.append({"ligne": line_num, "raison": bad_date})
+            continue
 
         if bat_nom not in by_name:
             new_bat = Batiment(nom=bat_nom, programme_id=programme_id)
@@ -872,22 +1164,32 @@ async def _import_lots_impl(programme_id: int, db: Session, file: bytes | None):
         bat = by_name[bat_nom]
 
         payload = {}
-        for k in ("lot", "niveau", "type", "orientation", "acquereur", "statut"):
-            if k in row:
-                payload[k] = row[k] or None
-        if "statut" in row:
+        # Cellule absente ou vide : on ne touche pas la valeur existante
+        # (avant, une cellule vide effacait la valeur, et un statut vide
+        # faisait echouer tout l'import). #EFFACER : on vide le champ.
+        for k in ("lot", "niveau", "type", "orientation", "acquereur"):
+            if _is_csv_clear(row.get(k)):
+                payload[k] = None
+            elif (row.get(k) or "").strip():
+                payload[k] = row[k]
+        if statut:
             payload["statut"] = statut
+        payload.update(dates)
 
         for k in ("surface_sol", "sha_m2", "jardin", "terrasse", "prix_logement", "prix_stationnement", "prix_total", "prix_m2_appartement", "prix_m2_appart_parking"):
-            if row.get(k) not in (None, ""):
+            if _is_csv_clear(row.get(k)):
+                payload[k] = None
+            elif row.get(k) not in (None, ""):
                 try:
                     payload[k] = float(row[k])
                 except ValueError:
                     errors.append({"ligne": line_num, "raison": f"valeur numérique invalide pour '{k}': {row[k]!r}"})
 
+        # Cases a cocher : cellule vide = on ne touche pas ; pour decocher, "Non".
         for k in ("garage", "parking1", "parking2", "cave"):
             v = (row.get(k) or "").strip().lower()
-            payload[k] = v in ("1", "true", "oui", "yes", "y")
+            if v:
+                payload[k] = v in ("1", "true", "oui", "yes", "y")
 
         existing = db.query(Lot).filter(Lot.batiment_id == bat.id, Lot.lot == lot_num).first()
         if existing:
@@ -1058,6 +1360,8 @@ def list_clients(db: Session = Depends(get_db)):
                 "first_name": p.first_name,
                 "email": p.email,
                 "phone": p.phone,
+                "address": p.address,
+                "address2": p.address2,
                 "partner_id": p.partner_id,
             }
 
